@@ -7,6 +7,7 @@ import {
   upsertSnapshot,
 } from "./storage.js";
 import { summarizeQianjiFile } from "./csv-parser.js";
+import { aggregatePeriod, buildPeriodOptions, periodDefinition } from "./period-summary.js";
 
 const byId = (id) => document.getElementById(id);
 const moneyFormatter = new Intl.NumberFormat("zh-CN", {
@@ -20,6 +21,7 @@ const now = new Date();
 const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 let state = loadState();
 let selectedMonth = currentMonth;
+let selectedPeriod = "";
 let currentPage = "overview";
 let uploadedSummary = null;
 let deferredInstallPrompt = null;
@@ -121,10 +123,6 @@ function safeNumber(value) {
   return Number.isFinite(number) && number >= 0 ? number : 0;
 }
 
-function selectedSnapshot() {
-  return state.snapshots.find((item) => item.month === selectedMonth) || null;
-}
-
 function sortedSnapshots() {
   return [...state.snapshots].sort((a, b) => a.month.localeCompare(b.month));
 }
@@ -180,33 +178,49 @@ function applyRole() {
   });
 }
 
-function renderMonthOptions() {
-  const options = [...new Set([...state.snapshots.map((item) => item.month), currentMonth])]
-    .sort((a, b) => b.localeCompare(a));
-  if (!options.includes(selectedMonth)) selectedMonth = options[0] || currentMonth;
-  byId("overviewMonthSelect").innerHTML = options
-    .map((month) => `<option value="${month}">${monthLabel(month)}</option>`)
-    .join("");
-  byId("overviewMonthSelect").value = selectedMonth;
+function optionGroup(label, values) {
+  if (!values.length) return "";
+  return `<optgroup label="${label}">${values.map((value) => {
+    const definition = periodDefinition(value);
+    return `<option value="${value}">${definition.optionLabel}</option>`;
+  }).join("")}</optgroup>`;
 }
 
-function adviceFor(snapshot) {
-  const metrics = calculate(snapshot);
-  const budget = state.settings.monthlyBudget;
-  const previous = previousSnapshot(snapshot.month);
+function renderPeriodOptions() {
+  const options = buildPeriodOptions(state.snapshots, currentMonth);
+  const allValues = [...options.months, ...options.halves, ...options.years];
+  if (!allValues.includes(selectedPeriod)) {
+    const preferred = `month:${selectedMonth}`;
+    selectedPeriod = allValues.includes(preferred) ? preferred : allValues[0];
+  }
+  byId("overviewPeriodSelect").innerHTML = [
+    optionGroup("按月查看", options.months),
+    optionGroup("半年度总结", options.halves),
+    optionGroup("年终总结", options.years),
+  ].join("");
+  byId("overviewPeriodSelect").value = selectedPeriod;
+}
+
+function adviceFor(report) {
+  const { metrics, definition } = report;
+  const periodBudget = state.settings.monthlyBudget * report.coverageCount;
+  const previous = previousSnapshot(definition.startMonth);
+  const periodCopy = definition.kind === "month" ? "本月" : definition.label;
   const advice = [];
-  if (budget > 0 && metrics.expense <= budget) {
-    advice.push(`本月支出比预算少 ${money(budget - metrics.expense)}。先保住这个可持续节奏，不必为了省钱牺牲真正重要的生活。`);
-  } else if (budget > 0) {
-    advice.push(`本月支出超过预算 ${money(metrics.expense - budget)}。先确认这是一次性大事，还是会重复出现的生活成本。`);
+  if (periodBudget > 0 && metrics.expense <= periodBudget) {
+    advice.push(`${periodCopy}支出比已记录月份预算少 ${money(periodBudget - metrics.expense)}。先保住这个可持续节奏，不必为了省钱牺牲真正重要的生活。`);
+  } else if (periodBudget > 0) {
+    advice.push(`${periodCopy}支出超过已记录月份预算 ${money(metrics.expense - periodBudget)}。先确认这是一次性大事，还是会重复出现的生活成本。`);
   }
   advice.push(`两人共把收入的 ${Math.round(metrics.transferRate * 100)}% 转入家庭。工资到账后自动转入，能让储蓄先发生。`);
 
-  if (Math.abs(metrics.allocationGap) > 100) {
-    advice.push(`工资、家庭转入和当月个人留存之间还有 ${money(Math.abs(metrics.allocationGap))} 的差额。它不一定是错误，但值得确认是否有奖金、还款或其他大额流向。`);
-  } else if (previous) {
-    const accountDelta = snapshot.accounts.familySavingsBalance
-      + snapshot.accounts.familySpendingBalance
+  if (definition.kind !== "month" && report.coverageCount < definition.expectedMonths) {
+    advice.push(`${definition.label}目前已记录 ${report.coverageCount}/${definition.expectedMonths} 个月。这是阶段性总结，月份补齐后会自动更新。`);
+  } else if (Math.abs(metrics.allocationGap) > 100) {
+    advice.push(`工资、家庭转入和${definition.kind === "month" ? "当月" : "累计"}个人留存之间还有 ${money(Math.abs(metrics.allocationGap))} 的差额。它不一定是错误，但值得确认是否有奖金、还款或其他大额流向。`);
+  } else if (previous && report.latest) {
+    const accountDelta = report.latest.accounts.familySavingsBalance
+      + report.latest.accounts.familySpendingBalance
       - previous.accounts.familySavingsBalance
       - previous.accounts.familySpendingBalance;
     const expectedDelta = metrics.totalTransfer - metrics.expense;
@@ -219,12 +233,13 @@ function adviceFor(snapshot) {
   } else {
     advice.push("这是基线月。连续记录三个月后，再用趋势判断预算是否需要调整。 ");
   }
-  return advice;
+  return advice.slice(0, 3);
 }
 
-function personCard(key, snapshot) {
-  const person = snapshot.people[key];
+function personCard(key, report) {
+  const person = report.people[key];
   const configured = state.settings.people[key];
+  const monthly = report.definition.kind === "month";
   const alternate = key === "chenqian" ? " alternate" : "";
   const initial = escapeHtml(configured.name.slice(0, 1));
   const name = escapeHtml(configured.name);
@@ -236,52 +251,98 @@ function personCard(key, snapshot) {
         <div class="person-input-title"><span class="avatar${alternate}">${initial}</span><strong>${name}</strong></div>
         <small>留存 ${Math.round(retainedRate * 100)}%</small>
       </div>
-      <div class="person-stat-row"><span>到账工资</span><strong>${money(person.income)}</strong></div>
-      <div class="person-stat-row"><span>转入家庭</span><strong>${money(person.householdTransfer)}</strong></div>
-      <div class="person-stat-row"><span>当月个人留存</span><strong>${money(person.privateKept)}</strong></div>
+      <div class="person-stat-row"><span>${monthly ? "到账工资" : "累计到账"}</span><strong>${money(person.income)}</strong></div>
+      <div class="person-stat-row"><span>${monthly ? "转入家庭" : "累计转入家庭"}</span><strong>${money(person.householdTransfer)}</strong></div>
+      <div class="person-stat-row"><span>${monthly ? "当月个人留存" : "累计个人留存"}</span><strong>${money(person.privateKept)}</strong></div>
       <div class="person-stat-row"><span>未分配差额</span><strong>${money(gap)}</strong></div>
     </article>`;
 }
 
+function savingsChangeForReport(report) {
+  const previous = previousSnapshot(report.definition.startMonth);
+  if (previous) return report.latest.accounts.familySavingsBalance - previous.accounts.familySavingsBalance;
+  if (report.snapshots.length > 1) {
+    return report.latest.accounts.familySavingsBalance - report.first.accounts.familySavingsBalance;
+  }
+  return null;
+}
+
+function renderPeriodSummary(report, savingsChange) {
+  const section = byId("periodSummarySection");
+  const visible = report.definition.kind !== "month";
+  section.hidden = !visible;
+  if (!visible) return;
+  const coveragePercent = report.coverageCount / report.definition.expectedMonths * 100;
+  const averageExpense = report.coverageCount > 0 ? report.metrics.expense / report.coverageCount : 0;
+  const familyHourlyRate = getFamilyWorkMetrics().hourlyRate;
+  const lifeHours = familyHourlyRate > 0 ? report.metrics.expense / familyHourlyRate : 0;
+  setText("periodSummaryTitle", report.definition.summaryTitle);
+  setText("periodCoverageCopy", `已记录 ${report.coverageCount}/${report.definition.expectedMonths} 个月，数据补齐后自动更新`);
+  setText("periodCoveragePercent", `${numberFormatter.format(coveragePercent)}%`);
+  byId("periodCoverageFill").style.width = `${Math.min(100, coveragePercent)}%`;
+  setText("periodAverageExpense", money(averageExpense));
+  setText("periodSavingsChange", savingsChange === null
+    ? "基线待形成"
+    : `${savingsChange >= 0 ? "+" : "-"}${money(Math.abs(savingsChange))}`);
+  setText("periodLifeHours", familyHourlyRate > 0 ? `${numberFormatter.format(lifeHours)} 小时` : "待设置");
+  renderCategoryList("periodCategoryList", report.categoryBreakdown, "这个周期还没有钱迹分类汇总。");
+}
+
 function renderOverview() {
-  renderMonthOptions();
-  const snapshot = selectedSnapshot();
-  byId("overviewEmpty").hidden = Boolean(snapshot);
-  byId("overviewContent").hidden = !snapshot;
-  setText("headerMonthLabel", snapshot ? monthLabel(snapshot.month) : "尚未开始记录");
-  if (!snapshot) return;
+  renderPeriodOptions();
+  const report = aggregatePeriod(state.snapshots, selectedPeriod);
+  const hasData = Boolean(report?.latest);
+  const definition = report?.definition || periodDefinition(selectedPeriod);
+  byId("overviewEmpty").hidden = hasData;
+  byId("overviewContent").hidden = !hasData;
+  setText("headerMonthLabel", definition?.label || "尚未开始记录");
+  if (!hasData) {
+    const noRecordsAtAll = state.snapshots.length === 0;
+    setText("overviewEmptyTitle", noRecordsAtAll ? "从第一个月开始" : `${definition.label}还没有记录`);
+    setText("overviewEmptyCopy", noRecordsAtAll
+      ? "录入工资、家庭转入和两张家庭卡余额，再上传钱迹月度 CSV。"
+      : "切换到已有周期，或进入月度记录补上这个月的大数。 ");
+    return;
+  }
 
-  const metrics = calculate(snapshot);
-  const previous = previousSnapshot(snapshot.month);
-  const savingsChange = previous
-    ? snapshot.accounts.familySavingsBalance - previous.accounts.familySavingsBalance
-    : null;
+  const { metrics, latest } = report;
+  const savingsChange = savingsChangeForReport(report);
   const goal = state.settings.savingsGoal;
-  const goalPercent = goal > 0 ? Math.min(100, snapshot.accounts.familySavingsBalance / goal * 100) : 0;
-  const budget = state.settings.monthlyBudget;
-  const budgetUsage = budget > 0 ? metrics.expense / budget * 100 : 0;
+  const goalPercent = goal > 0 ? Math.min(100, latest.accounts.familySavingsBalance / goal * 100) : 0;
+  const periodBudget = state.settings.monthlyBudget * report.coverageCount;
+  const budgetUsage = periodBudget > 0 ? metrics.expense / periodBudget * 100 : 0;
+  const monthly = definition.kind === "month";
 
-  setText("savingsBalance", money(snapshot.accounts.familySavingsBalance));
+  setText("overviewKicker", monthly
+    ? "这个月，钱去了哪里"
+    : definition.kind === "half" ? "这半年，家庭向前多少" : "这一年，钱换来了什么");
+  setText("savingsBalance", money(latest.accounts.familySavingsBalance));
   setText("savingsChange", savingsChange === null
-    ? "首月记录，暂无环比"
-    : `较上次${savingsChange >= 0 ? "增加" : "减少"} ${money(Math.abs(savingsChange))}`);
+    ? "当前只有一个基线记录"
+    : `${monthly ? "较上次" : "较期初"}${savingsChange >= 0 ? "增加" : "减少"} ${money(Math.abs(savingsChange))}`);
   setText("goalPercent", `${numberFormatter.format(goalPercent)}%`);
   byId("goalProgress").value = goalPercent;
   setText("totalIncome", money(metrics.totalIncome));
   setText("totalTransfer", money(metrics.totalTransfer));
   setText("totalExpense", money(metrics.expense));
   setText("operatingBalance", money(metrics.operatingBalance));
-  setText("budgetSummary", `本月预算 ${money(budget)}`);
+  setText("budgetSummary", monthly
+    ? `本月预算 ${money(periodBudget)}`
+    : `已记录 ${report.coverageCount}/${definition.expectedMonths} 个月 · 对应预算 ${money(periodBudget)}`);
   setText("budgetUsage", `${numberFormatter.format(budgetUsage)}%`);
   const fill = byId("budgetLineFill");
   fill.style.width = `${Math.min(100, budgetUsage)}%`;
   fill.classList.toggle("over-budget", budgetUsage > 100);
-  setText("spendingCardBalance", `花销卡余额 ${money(snapshot.accounts.familySpendingBalance)}`);
-  setText("budgetRemaining", budget - metrics.expense >= 0
-    ? `预算剩余 ${money(budget - metrics.expense)}`
-    : `超出 ${money(metrics.expense - budget)}`);
-  byId("peopleGrid").innerHTML = personCard("suli", snapshot) + personCard("chenqian", snapshot);
-  byId("adviceList").innerHTML = adviceFor(snapshot)
+  setText("spendingCardBalance", `${monthly ? "花销卡余额" : "期末花销卡"} ${money(latest.accounts.familySpendingBalance)}`);
+  setText("budgetRemaining", periodBudget - metrics.expense >= 0
+    ? `预算剩余 ${money(periodBudget - metrics.expense)}`
+    : `超出 ${money(metrics.expense - periodBudget)}`);
+  setText("peopleSectionTitle", monthly ? "这个月如何分配" : `${definition.shortLabel}如何分配`);
+  setText("peopleSectionCopy", monthly ? "只看工资、家庭转入和当月个人留存" : "累计工资、家庭转入和个人留存");
+  setText("adviceSectionTitle", monthly ? "本月建议" : `${definition.shortLabel}建议`);
+  byId("peopleGrid").innerHTML = personCard("suli", report) + personCard("chenqian", report);
+  renderPeriodSummary(report, savingsChange);
+  byId("adviceList").innerHTML = adviceFor(report)
     .map((item, index) => `<div class="advice-item"><span class="advice-number">${index + 1}</span><p>${item}</p></div>`)
     .join("");
 }
@@ -293,6 +354,18 @@ function getWorkMetrics(key) {
   const hourlyRate = hours > 0 ? effectiveIncome / hours : 0;
   const minutesPerTen = hourlyRate > 0 ? 10 / hourlyRate * 60 : 0;
   return { ...profile, hours, effectiveIncome, hourlyRate, minutesPerTen };
+}
+
+function getFamilyWorkMetrics() {
+  const suli = getWorkMetrics("suli");
+  const chenqian = getWorkMetrics("chenqian");
+  const hours = suli.hours + chenqian.hours;
+  const effectiveIncome = suli.effectiveIncome + chenqian.effectiveIncome;
+  return {
+    hours,
+    effectiveIncome,
+    hourlyRate: hours > 0 ? effectiveIncome / hours : 0,
+  };
 }
 
 function lifeCard(key) {
@@ -398,15 +471,14 @@ function drawSavingsChart(snapshots) {
   snapshots.forEach((item, index) => context.fillText(item.month.slice(5), x(index), height - 8));
 }
 
-function renderCategories(snapshot) {
-  const entries = Object.entries(snapshot.expense.categoryBreakdown || {}).sort((a, b) => b[1] - a[1]);
-  setText("categoryMonthLabel", monthLabel(snapshot.month));
+function renderCategoryList(elementId, breakdown, emptyCopy) {
+  const entries = Object.entries(breakdown || {}).sort((a, b) => b[1] - a[1]);
   if (!entries.length) {
-    byId("categoryList").innerHTML = '<p class="life-summary">这个月没有保存钱迹分类汇总。</p>';
+    byId(elementId).innerHTML = `<p class="life-summary">${escapeHtml(emptyCopy)}</p>`;
     return;
   }
   const total = entries.reduce((sum, [, value]) => sum + value, 0);
-  byId("categoryList").innerHTML = entries.map(([category, value]) => {
+  byId(elementId).innerHTML = entries.map(([category, value]) => {
     const percent = total > 0 ? value / total * 100 : 0;
     return `<div class="category-row">
       <div class="category-copy"><span>${escapeHtml(category)}</span><small>${Math.round(percent)}%</small></div>
@@ -414,6 +486,11 @@ function renderCategories(snapshot) {
       <strong>${money(value)}</strong>
     </div>`;
   }).join("");
+}
+
+function renderCategories(snapshot) {
+  setText("categoryMonthLabel", monthLabel(snapshot.month));
+  renderCategoryList("categoryList", snapshot.expense.categoryBreakdown, "这个月没有保存钱迹分类汇总。");
 }
 
 function renderTrends() {
@@ -434,11 +511,7 @@ function renderTrends() {
   setText("trendGoalPercent", `目标 ${numberFormatter.format(goalPercent)}%`);
   byId("lifeGrid").innerHTML = lifeCard("suli") + lifeCard("chenqian");
 
-  const suli = getWorkMetrics("suli");
-  const chenqian = getWorkMetrics("chenqian");
-  const totalHours = suli.hours + chenqian.hours;
-  const totalEffectiveIncome = suli.effectiveIncome + chenqian.effectiveIncome;
-  const familyHourlyRate = totalHours > 0 ? totalEffectiveIncome / totalHours : 0;
+  const familyHourlyRate = getFamilyWorkMetrics().hourlyRate;
   const expenseLifeHours = familyHourlyRate > 0 ? latest.expense.confirmedTotal / familyHourlyRate : 0;
   setText("lifeSummary", familyHourlyRate > 0
     ? `${monthLabel(latest.month)}的家庭支出 ${money(latest.expense.confirmedTotal)}，约等于两人合计 ${numberFormatter.format(expenseLifeHours)} 小时的生命能量。这个数字用于判断支出是否值得，不是制造内疚。`
@@ -646,8 +719,10 @@ function bindEvents() {
   document.querySelectorAll("[data-go]").forEach((button) => {
     button.addEventListener("click", () => switchPage(button.dataset.go));
   });
-  byId("overviewMonthSelect").addEventListener("change", (event) => {
-    selectedMonth = event.target.value;
+  byId("overviewPeriodSelect").addEventListener("change", (event) => {
+    selectedPeriod = event.target.value;
+    const definition = periodDefinition(selectedPeriod);
+    if (definition?.kind === "month") selectedMonth = definition.startMonth;
     renderOverview();
   });
   byId("monthInput").addEventListener("change", (event) => {
@@ -673,6 +748,7 @@ function bindEvents() {
     state = upsertSnapshot(state, candidate);
     demoMode = false;
     selectedMonth = byId("monthInput").value;
+    selectedPeriod = `month:${selectedMonth}`;
     renderAll();
     switchPage("overview");
     showToast(`${monthLabel(selectedMonth)}已保存`);
@@ -720,6 +796,7 @@ function bindEvents() {
       state = importState(await file.text());
       demoMode = false;
       selectedMonth = state.snapshots.at(-1)?.month || currentMonth;
+      selectedPeriod = `month:${selectedMonth}`;
       applyTheme();
       applyRole();
       renderAll();
@@ -736,6 +813,7 @@ function bindEvents() {
     state = clearState();
     demoMode = false;
     selectedMonth = currentMonth;
+    selectedPeriod = `month:${currentMonth}`;
     applyTheme();
     applyRole();
     renderAll();
@@ -785,6 +863,8 @@ async function registerServiceWorker() {
 }
 
 withDemoData();
+selectedMonth = sortedSnapshots().at(-1)?.month || currentMonth;
+selectedPeriod = `month:${selectedMonth}`;
 applyTheme();
 bindEvents();
 renderAll();

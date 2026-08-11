@@ -31,18 +31,18 @@
       <section class="page active" id="overviewPage" data-page="overview" aria-labelledby="overviewTitle">
         <div class="page-heading">
           <div>
-            <p class="kicker">这个月，钱去了哪里</p>
+            <p class="kicker" id="overviewKicker">这个月，钱去了哪里</p>
             <h1 id="overviewTitle">家庭经济状况</h1>
           </div>
           <label class="month-picker compact-field">
-            <span>查看月份</span>
-            <select id="overviewMonthSelect" aria-label="查看月份"></select>
+            <span>查看周期</span>
+            <select id="overviewPeriodSelect" aria-label="查看月份、半年或年终总结"></select>
           </label>
         </div>
 
         <div class="empty-state" id="overviewEmpty">
-          <p class="empty-title">从第一个月开始</p>
-          <p>录入工资、家庭转入和两张家庭卡余额，再上传钱迹月度 CSV。</p>
+          <p class="empty-title" id="overviewEmptyTitle">从第一个月开始</p>
+          <p id="overviewEmptyCopy">录入工资、家庭转入和两张家庭卡余额，再上传钱迹月度 CSV。</p>
           <button class="primary-button manager-only" type="button" data-go="entry">录入本月</button>
         </div>
 
@@ -97,15 +97,35 @@
           <section class="people-section">
             <div class="section-title-row">
               <div>
-                <h2>这个月如何分配</h2>
-                <p>只看工资、家庭转入和当月个人留存</p>
+                <h2 id="peopleSectionTitle">这个月如何分配</h2>
+                <p id="peopleSectionCopy">只看工资、家庭转入和当月个人留存</p>
               </div>
             </div>
             <div class="people-grid" id="peopleGrid"></div>
           </section>
 
+          <section class="period-summary-section" id="periodSummarySection" hidden>
+            <div class="section-title-row">
+              <div>
+                <h2 id="periodSummaryTitle">半年总结</h2>
+                <p id="periodCoverageCopy">已记录 0/6 个月</p>
+              </div>
+              <strong id="periodCoveragePercent">0%</strong>
+            </div>
+            <div class="period-coverage-track" aria-hidden="true"><span id="periodCoverageFill"></span></div>
+            <div class="summary-stat-grid">
+              <article><span>平均每月支出</span><strong id="periodAverageExpense">¥0</strong></article>
+              <article><span>家庭储蓄变化</span><strong id="periodSavingsChange">¥0</strong></article>
+              <article><span>累计生命能量</span><strong id="periodLifeHours">待设置</strong></article>
+            </div>
+            <div class="period-category-block">
+              <h3>支出结构</h3>
+              <div class="category-list" id="periodCategoryList"></div>
+            </div>
+          </section>
+
           <section class="advice-section">
-            <h2>本月建议</h2>
+            <h2 id="adviceSectionTitle">本月建议</h2>
             <div class="advice-list" id="adviceList"></div>
           </section>
         </div>
@@ -194,17 +214,25 @@
       <section class="page" id="trendsPage" data-page="trends" aria-labelledby="trendsTitle">
         <div class="page-heading">
           <div>
-            <p class="kicker">看方向，不盯每一笔</p>
-            <h1 id="trendsTitle">趋势与生命时间</h1>
+            <p class="kicker">把钱换回时间，看它是否值得</p>
+            <h1 id="trendsTitle">生命能量</h1>
           </div>
         </div>
 
         <div class="empty-state" id="trendsEmpty">
-          <p class="empty-title">还没有趋势</p>
-          <p>保存首个月度记录后，这里会显示储蓄、收支和生命时间。</p>
+          <p class="empty-title">还没有生命能量数据</p>
+          <p>保存首个月度记录并设置工作时间后，这里会显示支出对应的生命时间。</p>
         </div>
 
         <div id="trendsContent" hidden>
+          <section class="life-section">
+            <div class="section-title-row">
+              <div><h2>每赚 10 元，需要多久</h2><p>工资扣除工作成本，并计入通勤时间</p></div>
+            </div>
+            <div class="life-grid" id="lifeGrid"></div>
+            <div class="life-summary" id="lifeSummary"></div>
+          </section>
+
           <section class="trend-section">
             <div class="section-title-row">
               <div><h2>收入、转入与支出</h2><p>最近 12 个月</p></div>
@@ -225,14 +253,6 @@
             </div>
           </section>
 
-          <section class="life-section">
-            <div class="section-title-row">
-              <div><h2>每赚 10 元，需要多久</h2><p>工资扣除工作成本，并计入通勤时间</p></div>
-            </div>
-            <div class="life-grid" id="lifeGrid"></div>
-            <div class="life-summary" id="lifeSummary"></div>
-          </section>
-
           <section class="category-section">
             <div class="section-title-row"><div><h2>最近月份支出结构</h2><p id="categoryMonthLabel"></p></div></div>
             <div class="category-list" id="categoryList"></div>
@@ -244,7 +264,7 @@
     <nav class="bottom-nav" aria-label="主导航">
       <button type="button" class="nav-button active" data-page-target="overview"><span>总览</span></button>
       <button type="button" class="nav-button" data-page-target="entry"><span>月度记录</span></button>
-      <button type="button" class="nav-button" data-page-target="trends"><span>趋势</span></button>
+      <button type="button" class="nav-button" data-page-target="trends"><span>生命能量</span></button>
     </nav>
   </div>
 

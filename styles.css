@@ -81,6 +81,7 @@
 html {
   min-height: 100%;
   background: var(--canvas);
+  scroll-padding-bottom: 7rem;
   -webkit-text-size-adjust: 100%;
 }
 
@@ -97,6 +98,7 @@ input,
 select,
 textarea {
   font: inherit;
+  font-variant-numeric: tabular-nums;
 }
 
 button,
@@ -232,7 +234,7 @@ h2 {
 }
 
 .app-main {
-  padding: 1.4rem 1rem calc(6.5rem + env(safe-area-inset-bottom));
+  padding: 1.4rem 1rem calc(7.5rem + env(safe-area-inset-bottom));
 }
 
 .page {
@@ -288,7 +290,8 @@ h2 {
 }
 
 .compact-field select {
-  width: 7.2rem;
+  width: 9.6rem;
+  font-weight: 650;
 }
 
 .empty-state {
@@ -320,6 +323,7 @@ h2 {
 .budget-section,
 .people-section,
 .advice-section,
+.period-summary-section,
 .trend-section,
 .life-section,
 .category-section,
@@ -406,7 +410,7 @@ progress::-moz-progress-bar {
   box-shadow: var(--shadow);
 }
 
-.metric-strip > div {
+.metric-strip > article {
   min-width: 0;
   padding: 0.9rem;
   background: var(--surface);
@@ -569,23 +573,96 @@ progress::-moz-progress-bar {
   line-height: 1.55;
 }
 
+.period-coverage-track {
+  height: 0.42rem;
+  overflow: hidden;
+  background: var(--surface-muted);
+  border-radius: 999px;
+}
+
+.period-coverage-track span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+  transition: width 220ms ease-out;
+}
+
+.summary-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+}
+
+.summary-stat-grid article {
+  min-width: 0;
+  padding: 0.8rem;
+  background: var(--surface-strong);
+  border-radius: 13px;
+}
+
+.summary-stat-grid article:last-child {
+  grid-column: 1 / -1;
+}
+
+.summary-stat-grid span,
+.summary-stat-grid strong {
+  display: block;
+}
+
+.summary-stat-grid span {
+  margin-bottom: 0.3rem;
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+}
+
+.summary-stat-grid strong {
+  overflow: hidden;
+  font-size: 1.02rem;
+  text-overflow: ellipsis;
+}
+
+.period-category-block {
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.period-category-block h3 {
+  margin: 0 0 0.8rem;
+  font-size: 0.82rem;
+}
+
 fieldset {
   min-width: 0;
+  margin-inline: 0;
   border: 0;
 }
 
 .form-section {
-  padding: 1rem;
+  padding: 1rem 1rem 1.1rem;
 }
 
 .form-section legend {
-  padding: 0 0.25rem;
+  float: left;
+  width: 100%;
+  margin: 0 0 0.9rem;
+  padding: 0;
+  color: var(--ink);
+  font-size: 1rem;
   font-weight: 760;
+  line-height: 1.3;
+}
+
+.form-section > :not(legend) {
+  clear: both;
 }
 
 .field-grid {
   display: grid;
-  gap: 0.85rem;
+  gap: 0.72rem;
 }
 
 .field {
@@ -612,6 +689,7 @@ textarea,
   background: var(--surface-strong);
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
+  scroll-margin-bottom: 7rem;
 }
 
 textarea {
@@ -648,13 +726,13 @@ textarea {
 }
 
 .person-input-block + .person-input-block {
-  margin-top: 1rem;
-  padding-top: 1rem;
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
   border-top: 1px solid var(--line);
 }
 
 .person-input-title {
-  margin-bottom: 0.8rem;
+  margin-bottom: 0.68rem;
 }
 
 .upload-zone {
@@ -772,6 +850,7 @@ textarea {
 }
 
 .nav-button {
+  position: relative;
   min-height: 2.85rem;
   color: var(--ink-soft);
   background: transparent;
@@ -779,11 +858,31 @@ textarea {
   border-radius: 12px;
   font-size: 0.78rem;
   font-weight: 650;
+  transition: color 180ms ease, background-color 180ms ease, transform 120ms ease;
 }
 
 .nav-button.active {
   color: var(--accent-strong);
   background: var(--accent-soft);
+  font-weight: 780;
+}
+
+.nav-button.active::after {
+  position: absolute;
+  right: 28%;
+  bottom: 0.28rem;
+  left: 28%;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 999px;
+  content: "";
+}
+
+.nav-button:active,
+.primary-button:active,
+.secondary-button:active,
+.icon-button:active {
+  transform: scale(0.98);
 }
 
 .chart-wrap {
@@ -1020,8 +1119,28 @@ body.viewer-mode .settings-group:last-child .stacked-actions > :not(#toggleRoleB
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .summary-stat-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .summary-stat-grid article:last-child {
+    grid-column: auto;
+  }
+
   .full-width {
     grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 380px) {
+  .page-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .compact-field,
+  .compact-field select {
+    width: 100%;
   }
 }
 

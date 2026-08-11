@@ -24,7 +24,23 @@ try {
   assert.match(await page.title(), /家庭月度驾驶舱/);
   assert.equal(await page.$eval("#overviewContent", (element) => element.hidden), false);
   assert.match(await page.$eval("#savingsBalance", (element) => element.textContent), /89,100/);
+  assert.equal(await page.$eval('[data-page-target="trends"]', (element) => element.textContent.trim()), "生命能量");
   await page.screenshot({ path: `${outputDirectory}/mobile-overview.png`, fullPage: true });
+
+  await page.select("#overviewPeriodSelect", "half:2026-H2");
+  assert.match(await page.$eval("#totalIncome", (element) => element.textContent), /36,100/);
+  assert.match(await page.$eval("#totalExpense", (element) => element.textContent), /5,600/);
+  assert.match(await page.$eval("#periodCoverageCopy", (element) => element.textContent), /2\/6/);
+  assert.match(await page.$eval("#periodSavingsChange", (element) => element.textContent), /21,100/);
+  assert.equal(await page.$eval("#periodSummarySection", (element) => element.hidden), false);
+  await page.screenshot({ path: `${outputDirectory}/mobile-half-year.png`, fullPage: true });
+
+  await page.select("#overviewPeriodSelect", "year:2026");
+  assert.equal(await page.$eval('#overviewPeriodSelect option[value="year:2026"]', (element) => element.textContent), "2026年终总结");
+  assert.match(await page.$eval("#totalIncome", (element) => element.textContent), /53,800/);
+  assert.match(await page.$eval("#totalExpense", (element) => element.textContent), /8,480/);
+  assert.match(await page.$eval("#periodCoverageCopy", (element) => element.textContent), /3\/12/);
+  await page.select("#overviewPeriodSelect", "month:2026-08");
 
   await page.click('[data-page-target="entry"]');
   await page.waitForSelector("#entryPage.active");

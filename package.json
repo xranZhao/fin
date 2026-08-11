@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check app.js && node --check storage.js && node --check csv-parser.js && node --check sw.js",
+    "check": "node --check app.js && node --check storage.js && node --check csv-parser.js && node --check period-summary.js && node --check sw.js",
     "test:unit": "node tests/unit.mjs",
     "test:smoke": "node tests/smoke.mjs"
   }

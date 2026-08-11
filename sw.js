@@ -1,4 +1,4 @@
-const CACHE_NAME = "family-finance-shell-v2";
+const CACHE_NAME = "family-finance-shell-v3";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -6,6 +6,7 @@ const APP_SHELL = [
   "./app.js",
   "./storage.js",
   "./csv-parser.js",
+  "./period-summary.js",
   "./manifest.webmanifest",
   "./icon.svg",
 ];

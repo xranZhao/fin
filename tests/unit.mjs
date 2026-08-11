@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { parseCsvText, summarizeQianjiFile } from "../csv-parser.js";
+import { aggregatePeriod, buildPeriodOptions, periodDefinition } from "../period-summary.js";
 
 const quoted = parseCsvText('名称,备注\r\n"便利店,东门","他说""可以"""\r\n');
 assert.deepEqual(quoted, [["名称", "备注"], ["便利店,东门", '他说"可以"']]);
@@ -29,4 +30,54 @@ assert.deepEqual(result.categoryBreakdown, { 好好吃饭: 28.5, 生活成本: 1
 assert.deepEqual(result.sourceMonths, ["2026-07", "2026-08"]);
 assert.equal(result.encoding, "UTF-8");
 
-console.log("钱迹 CSV 汇总规则测试通过");
+const snapshots = [
+  {
+    month: "2026-06",
+    accounts: { familySpendingBalance: 620, familySavingsBalance: 68000 },
+    people: {
+      suli: { income: 8500, householdTransfer: 6500, privateKept: 2000 },
+      chenqian: { income: 9200, householdTransfer: 7000, privateKept: 2200 },
+    },
+    expense: { confirmedTotal: 2880, categoryBreakdown: { 好好吃饭: 1120, 生活成本: 930, 品质生活: 830 } },
+  },
+  {
+    month: "2026-07",
+    accounts: { familySpendingBalance: 480, familySavingsBalance: 78200 },
+    people: {
+      suli: { income: 8500, householdTransfer: 6400, privateKept: 2100 },
+      chenqian: { income: 9400, householdTransfer: 7200, privateKept: 2200 },
+    },
+    expense: { confirmedTotal: 3140, categoryBreakdown: { 好好吃饭: 1280, 生活成本: 1010, 品质生活: 850 } },
+  },
+  {
+    month: "2026-08",
+    accounts: { familySpendingBalance: 1160, familySavingsBalance: 89100 },
+    people: {
+      suli: { income: 8800, householdTransfer: 6800, privateKept: 2000 },
+      chenqian: { income: 9400, householdTransfer: 7200, privateKept: 2200 },
+    },
+    expense: { confirmedTotal: 2460, categoryBreakdown: { 好好吃饭: 980, 生活成本: 920, 品质生活: 560 } },
+  },
+];
+
+assert.equal(periodDefinition("half:2026-H2").label, "2026年下半年");
+const periodOptions = buildPeriodOptions(snapshots, "2026-08");
+assert.deepEqual(periodOptions.months, ["month:2026-08", "month:2026-07", "month:2026-06"]);
+assert.deepEqual(periodOptions.halves, ["half:2026-H2", "half:2026-H1"]);
+assert.deepEqual(periodOptions.years, ["year:2026"]);
+
+const halfYear = aggregatePeriod(snapshots, "half:2026-H2");
+assert.equal(halfYear.coverageCount, 2);
+assert.equal(halfYear.definition.expectedMonths, 6);
+assert.equal(halfYear.metrics.totalIncome, 36100);
+assert.equal(halfYear.metrics.totalTransfer, 27600);
+assert.equal(halfYear.metrics.expense, 5600);
+assert.equal(halfYear.metrics.allocationGap, 0);
+assert.deepEqual(halfYear.categoryBreakdown, { 好好吃饭: 2260, 生活成本: 1930, 品质生活: 1410 });
+
+const annual = aggregatePeriod(snapshots, "year:2026");
+assert.equal(annual.coverageCount, 3);
+assert.equal(annual.metrics.totalIncome, 53800);
+assert.equal(annual.metrics.expense, 8480);
+
+console.log("钱迹 CSV 与周期汇总规则测试通过");
