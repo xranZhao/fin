@@ -1,0 +1,12 @@
+{
+  "name": "family-finance-pwa",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check app.js && node --check storage.js && node --check csv-parser.js && node --check sw.js",
+    "test:unit": "node tests/unit.mjs",
+    "test:smoke": "node tests/smoke.mjs"
+  }
+}

@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#175d47">
+  <meta name="description" content="家庭月度财务驾驶舱，记录大数、预算、储蓄趋势和生命时间。">
+  <title>家庭月度驾驶舱</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true">家</span>
+        <div>
+          <p class="brand-title">家庭月度驾驶舱</p>
+          <p class="brand-subtitle" id="headerMonthLabel">尚未开始记录</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span class="role-label" id="roleLabel">管理视图</span>
+        <button class="icon-button" id="settingsButton" type="button" aria-label="打开设置">设置</button>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <section class="page active" id="overviewPage" data-page="overview" aria-labelledby="overviewTitle">
+        <div class="page-heading">
+          <div>
+            <p class="kicker">这个月，钱去了哪里</p>
+            <h1 id="overviewTitle">家庭经济状况</h1>
+          </div>
+          <label class="month-picker compact-field">
+            <span>查看月份</span>
+            <select id="overviewMonthSelect" aria-label="查看月份"></select>
+          </label>
+        </div>
+
+        <div class="empty-state" id="overviewEmpty">
+          <p class="empty-title">从第一个月开始</p>
+          <p>录入工资、家庭转入和两张家庭卡余额，再上传钱迹月度 CSV。</p>
+          <button class="primary-button manager-only" type="button" data-go="entry">录入本月</button>
+        </div>
+
+        <div id="overviewContent" hidden>
+          <section class="hero-balance" aria-label="家庭储蓄卡">
+            <div>
+              <p class="metric-label">家庭储蓄卡</p>
+              <p class="hero-amount" id="savingsBalance">¥0</p>
+              <p class="metric-change" id="savingsChange">首月记录，暂无环比</p>
+            </div>
+            <div class="goal-copy">
+              <span id="goalPercent">0%</span>
+              <small>储蓄目标进度</small>
+            </div>
+            <progress id="goalProgress" max="100" value="0" aria-label="储蓄目标进度"></progress>
+          </section>
+
+          <section class="metric-strip" aria-label="本月核心指标">
+            <article>
+              <p>家庭总收入</p>
+              <strong id="totalIncome">¥0</strong>
+            </article>
+            <article>
+              <p>共同转入</p>
+              <strong id="totalTransfer">¥0</strong>
+            </article>
+            <article>
+              <p>家庭总支出</p>
+              <strong id="totalExpense">¥0</strong>
+            </article>
+            <article>
+              <p>经营结余</p>
+              <strong id="operatingBalance">¥0</strong>
+            </article>
+          </section>
+
+          <section class="budget-section">
+            <div class="section-title-row">
+              <div>
+                <h2>家庭花销预算</h2>
+                <p id="budgetSummary">本月预算 ¥3,000</p>
+              </div>
+              <strong id="budgetUsage">0%</strong>
+            </div>
+            <div class="budget-line" aria-hidden="true"><span id="budgetLineFill"></span></div>
+            <div class="budget-foot">
+              <span id="spendingCardBalance">花销卡余额 ¥0</span>
+              <span id="budgetRemaining">剩余 ¥0</span>
+            </div>
+          </section>
+
+          <section class="people-section">
+            <div class="section-title-row">
+              <div>
+                <h2>这个月如何分配</h2>
+                <p>只看工资、家庭转入和当月个人留存</p>
+              </div>
+            </div>
+            <div class="people-grid" id="peopleGrid"></div>
+          </section>
+
+          <section class="advice-section">
+            <h2>本月建议</h2>
+            <div class="advice-list" id="adviceList"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="page" id="entryPage" data-page="entry" aria-labelledby="entryTitle">
+        <div class="page-heading">
+          <div>
+            <p class="kicker">每月一次，十分钟完成</p>
+            <h1 id="entryTitle">月度记录</h1>
+          </div>
+          <span class="readonly-notice viewer-only">只读</span>
+        </div>
+
+        <form id="monthlyForm" novalidate>
+          <fieldset class="form-section">
+            <legend>月份与家庭卡</legend>
+            <div class="field-grid two-columns">
+              <label class="field">
+                <span>记录月份</span>
+                <input type="month" id="monthInput" required>
+                <small>使用自然月作为唯一记录</small>
+              </label>
+              <label class="field">
+                <span>家庭花销卡余额</span>
+                <span class="money-input"><b>¥</b><input type="number" id="familySpendingBalanceInput" min="0" step="0.01" required inputmode="decimal"></span>
+              </label>
+              <label class="field full-width">
+                <span>家庭储蓄卡余额</span>
+                <span class="money-input"><b>¥</b><input type="number" id="familySavingsBalanceInput" min="0" step="0.01" required inputmode="decimal"></span>
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset class="form-section">
+            <legend>两人本月分配</legend>
+            <div class="person-input-block">
+              <div class="person-input-title"><span class="avatar">酥</span><strong id="suliFormName">酥梨</strong></div>
+              <div class="field-grid three-columns">
+                <label class="field"><span>到账工资</span><span class="money-input"><b>¥</b><input type="number" id="suliIncomeInput" min="0" step="0.01" required inputmode="decimal"></span></label>
+                <label class="field"><span>转入家庭</span><span class="money-input"><b>¥</b><input type="number" id="suliTransferInput" min="0" step="0.01" required inputmode="decimal"></span></label>
+                <label class="field"><span>当月个人留存</span><span class="money-input"><b>¥</b><input type="number" id="suliPrivateKeptInput" min="0" step="0.01" required inputmode="decimal"></span></label>
+              </div>
+            </div>
+            <div class="person-input-block">
+              <div class="person-input-title"><span class="avatar alternate">陈</span><strong id="chenqianFormName">陈前</strong></div>
+              <div class="field-grid three-columns">
+                <label class="field"><span>到账工资</span><span class="money-input"><b>¥</b><input type="number" id="chenqianIncomeInput" min="0" step="0.01" required inputmode="decimal"></span></label>
+                <label class="field"><span>转入家庭</span><span class="money-input"><b>¥</b><input type="number" id="chenqianTransferInput" min="0" step="0.01" required inputmode="decimal"></span></label>
+                <label class="field"><span>当月个人留存</span><span class="money-input"><b>¥</b><input type="number" id="chenqianPrivateKeptInput" min="0" step="0.01" required inputmode="decimal"></span></label>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="form-section manager-only">
+            <legend>钱迹月度汇总</legend>
+            <label class="upload-zone" for="qianjiFileInput">
+              <input type="file" id="qianjiFileInput" accept=".csv,text/csv">
+              <span class="upload-title">选择钱迹月度 CSV</span>
+              <small>文件只在当前设备解析，原始内容不会保存</small>
+            </label>
+            <div class="upload-result" id="uploadResult" hidden></div>
+            <label class="field expense-confirm-field">
+              <span>家庭总支出确认值</span>
+              <span class="money-input"><b>¥</b><input type="number" id="familyExpenseConfirmedInput" min="0" step="0.01" required inputmode="decimal"></span>
+              <small>默认使用钱迹自动汇总；如混入个人消费，可手动修正</small>
+            </label>
+          </fieldset>
+
+          <fieldset class="form-section">
+            <legend>本月说明</legend>
+            <label class="field">
+              <span>大事或异常</span>
+              <textarea id="noteInput" maxlength="200" rows="3" placeholder="例如：本月旅行，大额支出已共同确认"></textarea>
+              <small><span id="noteCount">0</span>/200</small>
+            </label>
+          </fieldset>
+
+          <div class="form-actions manager-only">
+            <button class="secondary-button" id="resetFormButton" type="button">清空</button>
+            <button class="primary-button" type="submit">保存本月记录</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="page" id="trendsPage" data-page="trends" aria-labelledby="trendsTitle">
+        <div class="page-heading">
+          <div>
+            <p class="kicker">看方向，不盯每一笔</p>
+            <h1 id="trendsTitle">趋势与生命时间</h1>
+          </div>
+        </div>
+
+        <div class="empty-state" id="trendsEmpty">
+          <p class="empty-title">还没有趋势</p>
+          <p>保存首个月度记录后，这里会显示储蓄、收支和生命时间。</p>
+        </div>
+
+        <div id="trendsContent" hidden>
+          <section class="trend-section">
+            <div class="section-title-row">
+              <div><h2>收入、转入与支出</h2><p>最近 12 个月</p></div>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="cashflowChart" aria-label="收入、转入与支出趋势图"></canvas>
+            </div>
+            <div class="chart-legend"><span class="income-key">收入</span><span class="transfer-key">转入</span><span class="expense-key">支出</span></div>
+          </section>
+
+          <section class="trend-section">
+            <div class="section-title-row">
+              <div><h2>家庭储蓄卡</h2><p id="trendSavingsCopy">从第一个月开始记录</p></div>
+              <strong id="trendGoalPercent">0%</strong>
+            </div>
+            <div class="chart-wrap compact-chart">
+              <canvas id="savingsChart" aria-label="家庭储蓄卡余额趋势图"></canvas>
+            </div>
+          </section>
+
+          <section class="life-section">
+            <div class="section-title-row">
+              <div><h2>每赚 10 元，需要多久</h2><p>工资扣除工作成本，并计入通勤时间</p></div>
+            </div>
+            <div class="life-grid" id="lifeGrid"></div>
+            <div class="life-summary" id="lifeSummary"></div>
+          </section>
+
+          <section class="category-section">
+            <div class="section-title-row"><div><h2>最近月份支出结构</h2><p id="categoryMonthLabel"></p></div></div>
+            <div class="category-list" id="categoryList"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="主导航">
+      <button type="button" class="nav-button active" data-page-target="overview"><span>总览</span></button>
+      <button type="button" class="nav-button" data-page-target="entry"><span>月度记录</span></button>
+      <button type="button" class="nav-button" data-page-target="trends"><span>趋势</span></button>
+    </nav>
+  </div>
+
+  <dialog id="settingsDialog" class="settings-dialog">
+    <form method="dialog" class="dialog-shell" id="settingsForm">
+      <div class="dialog-header">
+        <div><p class="kicker">只需要设置一次</p><h2>家庭设置</h2></div>
+        <button class="icon-button" value="cancel" aria-label="关闭设置">关闭</button>
+      </div>
+      <div class="dialog-body">
+        <section class="settings-group">
+          <h3>目标与名称</h3>
+          <div class="field-grid two-columns">
+            <label class="field"><span>月度花销预算</span><span class="money-input"><b>¥</b><input type="number" id="monthlyBudgetInput" min="0" step="100"></span></label>
+            <label class="field"><span>家庭储蓄目标</span><span class="money-input"><b>¥</b><input type="number" id="savingsGoalInput" min="0" step="10000"></span></label>
+            <label class="field"><span>你的昵称</span><input type="text" id="suliNameInput" maxlength="20"></label>
+            <label class="field"><span>伴侣昵称</span><input type="text" id="chenqianNameInput" maxlength="20"></label>
+          </div>
+        </section>
+
+        <section class="settings-group">
+          <h3>酥梨的工作时间</h3>
+          <div class="field-grid two-columns">
+            <label class="field"><span>参考税后月薪</span><input type="number" id="suliWorkIncomeInput" min="0" step="0.01"></label>
+            <label class="field"><span>每月工作小时</span><input type="number" id="suliWorkHoursInput" min="0" step="1"></label>
+            <label class="field"><span>每月通勤小时</span><input type="number" id="suliCommuteHoursInput" min="0" step="1"></label>
+            <label class="field"><span>每月工作成本</span><input type="number" id="suliWorkCostsInput" min="0" step="0.01"></label>
+          </div>
+        </section>
+
+        <section class="settings-group">
+          <h3>陈前的工作时间</h3>
+          <div class="field-grid two-columns">
+            <label class="field"><span>参考税后月薪</span><input type="number" id="chenqianWorkIncomeInput" min="0" step="0.01"></label>
+            <label class="field"><span>每月工作小时</span><input type="number" id="chenqianWorkHoursInput" min="0" step="1"></label>
+            <label class="field"><span>每月通勤小时</span><input type="number" id="chenqianCommuteHoursInput" min="0" step="1"></label>
+            <label class="field"><span>每月工作成本</span><input type="number" id="chenqianWorkCostsInput" min="0" step="0.01"></label>
+          </div>
+        </section>
+
+        <section class="settings-group">
+          <h3>查看与数据</h3>
+          <div class="stacked-actions">
+            <label class="select-row"><span>页面主题</span><select id="themeInput"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label>
+            <button type="button" class="secondary-button" id="toggleRoleButton">切换为只读预览</button>
+            <button type="button" class="secondary-button" id="installButton" hidden>安装到手机</button>
+            <button type="button" class="secondary-button" id="exportButton">导出数据备份</button>
+            <label class="secondary-button file-button">导入数据备份<input type="file" id="importBackupInput" accept="application/json,.json"></label>
+            <button type="button" class="danger-button" id="clearDataButton">清空本机数据</button>
+          </div>
+        </section>
+      </div>
+      <div class="dialog-footer"><button class="primary-button" id="saveSettingsButton" value="default">保存设置</button></div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
