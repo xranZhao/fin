@@ -37,6 +37,27 @@ function json(statusCode, payload, extra = {}) {
   };
 }
 
+function isAllowedOrigin(origin, request) {
+  if (!origin) return true;
+  const configured = String(process.env.ALLOWED_ORIGINS || "")
+    .split(",").map((item) => item.trim()).filter(Boolean);
+  const protocol = header(request.headers, "x-forwarded-proto") || "https";
+  return origin === `${protocol}://${request.host}` || configured.includes(origin);
+}
+
+function withCors(response, request) {
+  const origin = header(request.headers, "origin");
+  if (!origin || !isAllowedOrigin(origin, request)) return response;
+  response.headers = {
+    ...response.headers,
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match",
+    Vary: "Origin",
+  };
+  return response;
+}
+
 function securityHeaders() {
   return {
     "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
@@ -67,8 +88,11 @@ function signSession(payload) {
 }
 
 function readSession(request) {
+  const authorization = header(request.headers, "authorization");
+  const bearer = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
   const cookie = header(request.headers, "cookie");
-  const token = cookie.split(";").map((item) => item.trim()).find((item) => item.startsWith("ff_session="))?.slice(11);
+  const cookieToken = cookie.split(";").map((item) => item.trim()).find((item) => item.startsWith("ff_session="))?.slice(11);
+  const token = bearer || cookieToken;
   if (!token || !token.includes(".")) return null;
   const [body, signature] = token.split(".");
   const expected = createHmac("sha256", sessionSecret()).update(body).digest("base64url");
@@ -189,14 +213,10 @@ function validateState(state) {
   if (containsSensitive(state)) throw new Error("数据包含不允许保存的敏感字段");
 }
 
-function allowedOrigin(request) {
-  const origin = header(request.headers, "origin");
-  if (!origin) return true;
-  const protocol = header(request.headers, "x-forwarded-proto") || "https";
-  return origin === `${protocol}://${request.host}`;
-}
-
 async function handleApi(request) {
+  if (request.method === "OPTIONS") {
+    return { statusCode: 204, headers: { "Cache-Control": "no-store" }, body: "" };
+  }
   if (request.path === "/api/health" && request.method === "GET") return json(200, { ok: true });
 
   if (request.path === "/api/session" && request.method === "POST") {
@@ -217,12 +237,12 @@ async function handleApi(request) {
     loginAttempts.delete(key);
     const ttl = Math.min(Math.max(Number(process.env.SESSION_TTL_SECONDS) || 86400, 900), 604800);
     const exp = Math.floor(Date.now() / 1000) + ttl;
-    const secure = "Secure; HttpOnly; SameSite=Strict; Path=/";
-    return json(200, { role, expiresAt: new Date(exp * 1000).toISOString() }, { "Set-Cookie": `ff_session=${signSession({ role, exp })}; Max-Age=${ttl}; ${secure}` });
+    const token = signSession({ role, exp });
+    return json(200, { role, token, expiresAt: new Date(exp * 1000).toISOString() });
   }
 
   if (request.path === "/api/session" && request.method === "DELETE") {
-    return json(204, {}, { "Set-Cookie": "ff_session=; Max-Age=0; Secure; HttpOnly; SameSite=Strict; Path=/" });
+    return { statusCode: 204, headers: { "Cache-Control": "no-store" }, body: "" };
   }
 
   const auth = requireSession(request, request.path === "/api/state" && request.method === "PUT" ? "manager" : "viewer");
@@ -239,7 +259,7 @@ async function handleApi(request) {
   }
 
   if (request.path === "/api/state" && request.method === "PUT") {
-    if (!allowedOrigin(request)) return json(403, { error: "来源校验失败" });
+    if (!isAllowedOrigin(header(request.headers, "origin"), request)) return json(403, { error: "来源校验失败" });
     let state;
     try { state = JSON.parse(requestBody(request.event)); validateState(state); } catch (error) { return json(400, { error: error.message || "数据校验失败" }); }
     const clientEtag = header(request.headers, "if-match");
@@ -282,7 +302,8 @@ async function serveStatic(request) {
 export const handler = async (event, context) => {
   try {
     const request = requestInfo(event);
-    return request.path.startsWith("/api/") ? await handleApi(request) : await serveStatic(request);
+    const response = request.path.startsWith("/api/") ? await handleApi(request) : await serveStatic(request);
+    return withCors(response, request);
   } catch (error) {
     // 不输出密码、Cookie、请求正文或财务数据。
     console.error(JSON.stringify({ requestId: context?.requestId || "", message: error.message || "未知错误" }));

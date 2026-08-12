@@ -408,13 +408,18 @@ export function importState(jsonText) {
 
 // 云端适配器（预留）
 export class RemoteStateAdapter {
-  constructor(apiBase) {
+  constructor(apiBase, token) {
     this.apiBase = String(apiBase || "").replace(/\/$/, "");
+    this.token = String(token || "");
     this.etag = "";
   }
 
+  authHeaders() {
+    return this.token ? { Authorization: `Bearer ${this.token}` } : {};
+  }
+
   async load() {
-    const response = await fetch(`${this.apiBase}/api/state`, { credentials: "include" });
+    const response = await fetch(`${this.apiBase}/api/state`, { headers: this.authHeaders() });
     if (!response.ok) {
       const error = new Error(`云端读取失败：${response.status}`);
       error.status = response.status;
@@ -425,11 +430,10 @@ export class RemoteStateAdapter {
   }
 
   async save(state) {
-    const headers = { "Content-Type": "application/json" };
+    const headers = { "Content-Type": "application/json", ...this.authHeaders() };
     if (this.etag) headers["If-Match"] = this.etag;
     const response = await fetch(`${this.apiBase}/api/state`, {
       method: "PUT",
-      credentials: "include",
       headers,
       body: JSON.stringify(normalizeState(state)),
     });

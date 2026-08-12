@@ -32,6 +32,12 @@ let cloudMode = false;
 let cloudAdapter = null;
 let cloudSession = null;
 let skipNextSettingsSave = false;
+const cloudApiBase = String(window.FAMILY_FINANCE_API_BASE || "").replace(/\/$/, "");
+const cloudTokenKey = "family-finance-cloud-session";
+
+function cloudUrl(path) { return `${cloudApiBase}${path}`; }
+function readCloudToken() { return sessionStorage.getItem(cloudTokenKey) || ""; }
+function clearCloudToken() { sessionStorage.removeItem(cloudTokenKey); }
 
 function money(v) { return moneyFmt.format(Number(v) || 0).replace("CN¥", "¥"); }
 function num(v) { return numFmt.format(Number(v) || 0); }
@@ -107,16 +113,18 @@ async function loadCloudStateAfterLogin() {
 }
 
 async function setupCloudMode() {
-  if (["127.0.0.1", "localhost"].includes(location.hostname)) return;
+  if (!cloudApiBase || ["127.0.0.1", "localhost"].includes(location.hostname)) return;
   try {
-    const health = await fetch("/api/health", { credentials: "include" });
+    const health = await fetch(cloudUrl("/api/health"));
     if (!health.ok) return;
   } catch {
     return;
   }
   cloudMode = true;
-  cloudAdapter = new RemoteStateAdapter("");
-  const sessionResponse = await fetch("/api/session", { credentials: "include" });
+  const token = readCloudToken();
+  if (!token) { openCloudLogin(); return; }
+  cloudAdapter = new RemoteStateAdapter(cloudApiBase, token);
+  const sessionResponse = await fetch(cloudUrl("/api/session"), { headers: { Authorization: `Bearer ${token}` } });
   if (sessionResponse.ok) {
     cloudSession = await sessionResponse.json();
     try {
@@ -125,6 +133,8 @@ async function setupCloudMode() {
       openCloudLogin(error.message);
     }
   } else {
+    clearCloudToken();
+    cloudAdapter = null;
     openCloudLogin();
   }
 }
@@ -833,7 +843,9 @@ function toggleRole() {
 }
 
 async function logoutCloud() {
-  try { await fetch("/api/session", { method: "DELETE", credentials: "include" }); } catch { /* 本地清理仍可继续 */ }
+  const token = readCloudToken();
+  try { await fetch(cloudUrl("/api/session"), { method: "DELETE", headers: token ? { Authorization: `Bearer ${token}` } : {} }); } catch { /* 本地清理仍可继续 */ }
+  clearCloudToken();
   cloudSession = null;
   cloudAdapter = null;
   cloudMode = false;
@@ -873,16 +885,16 @@ async function init() {
     const button = byId("cloudLoginSubmit");
     button.disabled = true;
     try {
-      const response = await fetch("/api/session", {
+      const response = await fetch(cloudUrl("/api/session"), {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: byId("cloudRole").value, password: byId("cloudPassword").value }),
       });
       if (!response.ok) throw new Error("密码不正确，请重试");
       cloudMode = true;
-      cloudAdapter = new RemoteStateAdapter("");
       cloudSession = await response.json();
+      sessionStorage.setItem(cloudTokenKey, cloudSession.token);
+      cloudAdapter = new RemoteStateAdapter(cloudApiBase, cloudSession.token);
       await loadCloudStateAfterLogin();
       byId("cloudLoginDialog").close();
       renderOverview();

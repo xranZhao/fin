@@ -2,3 +2,4 @@ test-output/
 node_modules/
 *.log
 family-finance-fc.zip
+family-finance-fc-v*.zip
