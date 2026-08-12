@@ -1,0 +1,20 @@
+{
+  "name": "家庭月度驾驶舱",
+  "short_name": "家庭财务",
+  "description": "每月十分钟看清家庭收入、支出、储蓄和生命时间。",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f2f5f3",
+  "theme_color": "#175d47",
+  "lang": "zh-CN",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+
