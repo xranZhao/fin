@@ -36,8 +36,8 @@ const cloudApiBase = String(window.FAMILY_FINANCE_API_BASE || "").replace(/\/$/,
 const cloudTokenKey = "family-finance-cloud-session";
 
 function cloudUrl(path) { return `${cloudApiBase}${path}`; }
-function readCloudToken() { return sessionStorage.getItem(cloudTokenKey) || ""; }
-function clearCloudToken() { sessionStorage.removeItem(cloudTokenKey); }
+function readCloudToken() { return localStorage.getItem(cloudTokenKey) || ""; }
+function clearCloudToken() { localStorage.removeItem(cloudTokenKey); }
 
 function money(v) { return moneyFmt.format(Number(v) || 0).replace("CN¥", "¥"); }
 function num(v) { return numFmt.format(Number(v) || 0); }
@@ -74,9 +74,30 @@ async function syncCloudState() {
     showToast("已同步到家庭云端");
   } catch (error) {
     if (error.status === 409) {
-      showToast("另一台设备已更新数据，请重新加载后再保存");
+      // 自动重新加载云端数据，合并本地新录入
+      showToast("云端已被更新，正在自动合并…");
+      try {
+        const fresh = await cloudAdapter.load();
+        // 合并：保留本地月份中云端没有的，覆盖云端已有的
+        const merged = fresh;
+        for (const localSnap of state.snapshots) {
+          const existingIdx = merged.snapshots.findIndex(s => s.month === localSnap.month);
+          if (existingIdx >= 0) {
+            // 本地覆盖云端（用户已确认）
+            merged.snapshots[existingIdx] = localSnap;
+          } else {
+            merged.snapshots.push(localSnap);
+          }
+        }
+        merged.snapshots.sort((a, b) => a.month.localeCompare(b.month));
+        state = await cloudAdapter.save(merged);
+        showToast("已自动合并并同步到云端");
+      } catch (retryErr) {
+        showToast("自动合并失败，请重新加载页面后重试");
+        throw retryErr;
+      }
     } else {
-      showToast("本机已保存，但云端同步失败，请检查网络后重试");
+      showToast("本机已保存，云端同步失败：" + (error.message || "网络异常"));
     }
     throw error;
   }
@@ -335,7 +356,8 @@ function renderOverview() {
   budgetLine.style.width = `${Math.min(usedPct, 100)}%`;
   budgetLine.classList.toggle("over-budget", usedPct > 100);
   setText("spendingCardBalance", `花销卡 ${money(report.latest.accounts.familySpendingBalance)}`);
-  setText("budgetRemaining", `剩余 ${money(Math.max(0, budget - m.expense))}`);
+  setText("budgetActual", `实际 ${money(m.expense)}`);
+  setText("budgetRemaining", `${m.expense > budget ? "超出" : "剩余"} ${money(Math.max(0, budget - m.expense))}`);
 
   // 双人矩阵
   const su = report.latest.people.suli;
@@ -544,7 +566,7 @@ async function saveSnapshot(e) {
   };
 
   state = upsertSnapshot(state, snap);
-  try { await syncCloudState(); } catch { return; }
+  try { await syncCloudState(); } catch { /* syncCloudState 已 toast */ }
   showToast(`${monthLabel(month)} 已保存`);
   navigateTo("overview");
 }
@@ -947,7 +969,8 @@ async function init() {
       if (!response.ok) throw new Error("密码不正确，请重试");
       cloudMode = true;
       cloudSession = await response.json();
-      sessionStorage.setItem(cloudTokenKey, cloudSession.token);
+      localStorage.setItem(cloudTokenKey, cloudSession.token);
+      localStorage.setItem(cloudTokenKey + "-role", cloudSession.role);
       cloudAdapter = new RemoteStateAdapter(cloudApiBase, cloudSession.token);
       await loadCloudStateAfterLogin();
       byId("cloudLoginDialog").close();
