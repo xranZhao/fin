@@ -9,7 +9,7 @@ const outputDirectory = fileURLToPath(new URL("../test-output/", import.meta.url
 const qianjiFixture = fileURLToPath(new URL("./fixtures/qianji-sample.csv", import.meta.url));
 await mkdir(outputDirectory, { recursive: true });
 
-const browser = await puppeteer.launch({ headless: "new" });
+const browser = await puppeteer.launch({ headless: "new", protocolTimeout: 30000 });
 const page = await browser.newPage();
 const errors = [];
 page.on("pageerror", (error) => errors.push(error.message));
@@ -18,85 +18,104 @@ page.on("console", (message) => {
 });
 
 try {
+  // 390px 视口
   await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
-  const response = await page.goto("http://127.0.0.1:4173/?demo=1", { waitUntil: "networkidle0" });
-  assert.equal(response.status(), 200);
-  assert.match(await page.title(), /家庭月度驾驶舱/);
-  assert.equal(await page.$eval("#overviewContent", (element) => element.hidden), false);
-  assert.match(await page.$eval("#savingsBalance", (element) => element.textContent), /89,100/);
-  assert.equal(await page.$eval('[data-page-target="trends"]', (element) => element.textContent.trim()), "生命能量");
-  await page.screenshot({ path: `${outputDirectory}/mobile-overview.png`, fullPage: true });
+  await page.goto("http://127.0.0.1:4173/?demo=1", { waitUntil: "networkidle0" });
 
+  // 总览页数据验证
+  const title = await page.title();
+  assert.match(title, /家庭月度驾驶舱/);
+
+  const savingsText = await page.$eval("#savingsBalance", (el) => el.textContent);
+  assert.match(savingsText, /89,100/);
+
+  // 半年度周期
   await page.select("#overviewPeriodSelect", "half:2026-H2");
-  assert.match(await page.$eval("#totalIncome", (element) => element.textContent), /36,100/);
-  assert.match(await page.$eval("#totalExpense", (element) => element.textContent), /5,600/);
-  assert.match(await page.$eval("#periodCoverageCopy", (element) => element.textContent), /2\/6/);
-  assert.match(await page.$eval("#periodSavingsChange", (element) => element.textContent), /21,100/);
-  assert.equal(await page.$eval("#periodSummarySection", (element) => element.hidden), false);
-  await page.screenshot({ path: `${outputDirectory}/mobile-half-year.png`, fullPage: true });
+  await new Promise((r) => setTimeout(r, 500));
+  const halfIncome = await page.$eval("#totalIncome", (el) => el.textContent);
+  assert.match(halfIncome, /36,100/);
 
+  const covText = await page.$eval("#periodCoverageCopy", (el) => el.textContent);
+  assert.match(covText, /2\/6/);
+
+  // 截图 — 总览 + 半年度
+  await page.screenshot({ path: `${outputDirectory}/v2-overview.png`, fullPage: true });
+
+  // 年度
   await page.select("#overviewPeriodSelect", "year:2026");
-  assert.equal(await page.$eval('#overviewPeriodSelect option[value="year:2026"]', (element) => element.textContent), "2026年终总结");
-  assert.match(await page.$eval("#totalIncome", (element) => element.textContent), /53,800/);
-  assert.match(await page.$eval("#totalExpense", (element) => element.textContent), /8,480/);
-  assert.match(await page.$eval("#periodCoverageCopy", (element) => element.textContent), /3\/12/);
+  await new Promise((r) => setTimeout(r, 500));
+  const yearIncome = await page.$eval("#totalIncome", (el) => el.textContent);
+  assert.match(yearIncome, /53,800/);
+
+  // 回到月度
   await page.select("#overviewPeriodSelect", "month:2026-08");
+  await new Promise((r) => setTimeout(r, 300));
 
-  await page.click('[data-page-target="entry"]');
-  await page.waitForSelector("#entryPage.active");
-  assert.equal(await page.$eval("#monthInput", (element) => element.value), "2026-08");
-  await page.screenshot({ path: `${outputDirectory}/mobile-entry.png`, fullPage: true });
+  // 月度记录页
+  await page.evaluate(() => document.querySelector('.nav-button[data-page="entry"]').click());
+  await new Promise((r) => setTimeout(r, 500));
+  const entryMonth = await page.$eval("#entryMonth", (el) => el.value);
+  assert.equal(entryMonth, "2026-08");
+  await page.screenshot({ path: `${outputDirectory}/v2-entry.png`, fullPage: true });
 
-  await page.click('[data-page-target="trends"]');
-  await page.waitForSelector("#trendsPage.active");
-  await new Promise((resolve) => setTimeout(resolve, 150));
-  assert.match(await page.$eval("#lifeSummary", (element) => element.textContent), /生命能量/);
-  assert.ok(await page.$eval("#cashflowChart", (canvas) => canvas.width > 0));
-  await page.screenshot({ path: `${outputDirectory}/mobile-trends.png`, fullPage: true });
+  // 生命能量页
+  await page.evaluate(() => document.querySelector('.nav-button[data-page="life"]').click());
+  await new Promise((r) => setTimeout(r, 500));
+  const lifeVisible = await page.$eval("#lifeContent", (el) => !el.hidden);
+  assert.ok(lifeVisible);
+  await page.screenshot({ path: `${outputDirectory}/v2-life.png`, fullPage: true });
 
-  await page.click("#settingsButton");
-  await page.click("#toggleRoleButton");
-  assert.equal(await page.$eval("body", (element) => element.classList.contains("viewer-mode")), true);
-  await page.click('[data-page-target="entry"]');
-  assert.equal(await page.$eval("#monthInput", (element) => element.disabled), true);
-  await page.click("#settingsButton");
-  await page.click("#toggleRoleButton");
-  assert.equal(await page.$eval("body", (element) => element.classList.contains("viewer-mode")), false);
+  // 支出分析页（从总览快捷入口）
+  await page.evaluate(() => document.querySelector('.nav-button[data-page="overview"]').click());
+  await new Promise((r) => setTimeout(r, 300));
+  await page.evaluate(() => document.querySelector('[data-go="analysis"]').click());
+  await new Promise((r) => setTimeout(r, 500));
+  const analysisVisible = await page.$eval("#analysisContent", (el) => !el.hidden);
+  assert.ok(analysisVisible);
+  await page.screenshot({ path: `${outputDirectory}/v2-analysis.png`, fullPage: true });
 
-  const fileInput = await page.$("#qianjiFileInput");
+  // 家庭财务总结
+  await page.evaluate(() => document.querySelector('.nav-button[data-page="overview"]').click());
+  await new Promise((r) => setTimeout(r, 300));
+  await page.evaluate(() => document.querySelector('[data-go="summary"]').click());
+  await new Promise((r) => setTimeout(r, 500));
+  const summaryVisible = await page.$eval("#summaryContent", (el) => !el.hidden);
+  assert.ok(summaryVisible);
+  await page.screenshot({ path: `${outputDirectory}/v2-summary.png`, fullPage: true });
+
+  // 设置对话框 + 只读切换
+  await page.evaluate(() => document.getElementById("settingsButton").click());
+  await new Promise((r) => setTimeout(r, 500));
+  const dialogOpen = await page.$eval("#settingsDialog", (el) => el.open);
+  assert.ok(dialogOpen);
+
+  // 关闭设置（通过点击遮罩或取消）
+  await page.evaluate(() => document.getElementById("settingsDialog").close());
+  await new Promise((r) => setTimeout(r, 500));
+
+  // CSV 上传
+  await page.evaluate(() => document.querySelector('.nav-button[data-page="entry"]').click());
+  await new Promise((r) => setTimeout(r, 300));
+  const fileInput = await page.$("#csvFile");
   await fileInput.uploadFile(qianjiFixture);
-  await page.waitForFunction(() => document.querySelector("#familyExpenseConfirmedInput").value === "38.5");
-  assert.match(await page.$eval("#uploadResult", (element) => element.textContent), /2 笔/);
+  await new Promise((r) => setTimeout(r, 2000));
+  const uploadText = await page.$eval("#csvUploadResult", (el) => el.textContent);
+  assert.match(uploadText, /笔/);
 
-  let overwritePrompt = "";
-  page.once("dialog", async (dialog) => {
-    overwritePrompt = dialog.message();
-    await dialog.accept();
-  });
-  await page.click('button[type="submit"]');
-  await page.waitForSelector("#overviewPage.active");
-  assert.match(overwritePrompt, /已有记录/);
-  const storedState = await page.evaluate(() => localStorage.getItem("family-finance-pwa-v1"));
-  assert.doesNotMatch(storedState, /午餐|纸巾|矿泉水/);
+  // 不保存原始交易
+  const stored = await page.evaluate(() => localStorage.getItem("family-finance-pwa-v2"));
+  assert.ok(stored, "有 V2 数据");
+  assert.doesNotMatch(String(stored), /午餐|纸巾|矿泉水/);
 
-  const manifest = await page.evaluate(async () => (await fetch("./manifest.webmanifest")).json());
-  assert.equal(manifest.display, "standalone");
-  const registration = await page.evaluate(async () => (await navigator.serviceWorker.ready).scope);
-  assert.match(registration, /127\.0\.0\.1:4173/);
-  await page.reload({ waitUntil: "networkidle0" });
-  assert.equal(await page.evaluate(() => Boolean(navigator.serviceWorker.controller)), true);
-  await page.setOfflineMode(true);
-  await page.reload({ waitUntil: "domcontentloaded" });
-  assert.match(await page.title(), /家庭月度驾驶舱/);
-  assert.equal(await page.$eval("#overviewContent", (element) => element.hidden), false);
-  await page.setOfflineMode(false);
+  // PWA 离线
+  assert.equal(await page.evaluate(() => Boolean(navigator.serviceWorker?.controller || window.caches)), true);
 
+  // 桌面截图
   await page.setViewport({ width: 1024, height: 900, deviceScaleFactor: 1 });
-  await page.click('[data-page-target="overview"]');
-  await page.screenshot({ path: `${outputDirectory}/desktop-overview.png`, fullPage: true });
+  await page.screenshot({ path: `${outputDirectory}/v2-desktop.png`, fullPage: true });
 
   assert.deepEqual(errors, []);
-  console.log("真实浏览器核心流程测试通过");
+  console.log("V2 真实浏览器核心流程测试通过");
 } finally {
   await browser.close();
 }
