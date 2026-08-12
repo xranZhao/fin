@@ -118,6 +118,7 @@ export async function summarizeQianjiFile(file, selectedMonth) {
 
   const sourceMonths = new Set();
   const categoryBreakdown = {};
+  const subcategoryBreakdown = {}; // { "一级": { "二级": 金额 } }
   let matchedRows = 0;
   let skippedRows = 0;
   let total = 0;
@@ -143,10 +144,12 @@ export async function summarizeQianjiFile(file, selectedMonth) {
     }
     total += amount;
     categoryBreakdown[category] = (categoryBreakdown[category] || 0) + amount;
+    // 二级分类汇总
+    if (subcategory) {
+      if (!subcategoryBreakdown[category]) subcategoryBreakdown[category] = {};
+      subcategoryBreakdown[category][subcategory] = (subcategoryBreakdown[category][subcategory] || 0) + amount;
+    }
     matchedRows += 1;
-
-    // 保留读取二级分类这一动作，便于兼容钱迹不同导出模板。
-    void subcategory;
   });
 
   if (matchedRows === 0) {
@@ -160,6 +163,16 @@ export async function summarizeQianjiFile(file, selectedMonth) {
       Object.entries(categoryBreakdown)
         .sort((a, b) => b[1] - a[1])
         .map(([key, value]) => [key, Number(value.toFixed(2))]),
+    ),
+    subcategoryBreakdown: Object.fromEntries(
+      Object.entries(subcategoryBreakdown).map(([cat, subs]) => [
+        cat,
+        Object.fromEntries(
+          Object.entries(subs)
+            .sort((a, b) => b[1] - a[1])
+            .map(([k, v]) => [k, Number(v.toFixed(2))]),
+        ),
+      ]),
     ),
     sourceFileName: file.name,
     sourceMonths: [...sourceMonths].sort(),

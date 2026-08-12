@@ -296,6 +296,14 @@ h2 {
   padding: 0.35rem;
 }
 
+.back-button {
+  display: inline-block;
+  margin-bottom: 0.3rem;
+  color: var(--accent-strong);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
 .icon-button {
   min-height: 2.1rem;
   padding: 0.38rem 0.6rem;
@@ -932,7 +940,7 @@ textarea { resize: vertical; line-height: 1.5; }
   z-index: 25;
   right: 0; bottom: 0; left: 0;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   width: min(100%, var(--content-width));
   margin: 0 auto;
   padding: 0.45rem 0.7rem max(0.45rem, env(safe-area-inset-bottom));

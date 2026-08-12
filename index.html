@@ -295,6 +295,7 @@
       <section class="page" id="analysisPage" data-page="analysis">
         <div class="page-heading">
           <div>
+            <button class="text-button back-button" data-back="overview">← 回到概览</button>
             <p class="kicker">这个月，钱去了哪里</p>
             <h1>支出分析</h1>
           </div>
@@ -324,6 +325,18 @@
             <div class="category-list" id="analysisCategoryList"></div>
           </section>
 
+          <!-- 二级分类明细 -->
+          <section class="card card-spacious" id="analysisSubcategorySection">
+            <h2>各分类具体花在哪</h2>
+            <div id="analysisSubcategoryList"></div>
+          </section>
+
+          <!-- AI 诊断 -->
+          <section class="card card-spacious" id="analysisAISection">
+            <h2>智能诊断</h2>
+            <div id="analysisAIDiagnosis"></div>
+          </section>
+
           <!-- 关键花费 -->
           <section class="card" id="analysisKeyItems" hidden>
             <h2>值得关注</h2>
@@ -346,6 +359,7 @@
       <section class="page" id="summaryPage" data-page="summary">
         <div class="page-heading">
           <div>
+            <button class="text-button back-button" data-back="overview">← 回到概览</button>
             <p class="kicker">月度、半年和年度复盘</p>
             <h1>家庭财务总结</h1>
           </div>
@@ -425,6 +439,24 @@
         </div>
       </section>
 
+      <!-- ====== 6. 设置 ====== -->
+      <section class="page" id="settingsPage" data-page="settings" style="padding-bottom:2rem;">
+        <div class="page-heading">
+          <div>
+            <p class="kicker">每月录入前维护一次，后面自动计算</p>
+            <h1>家庭设置</h1>
+          </div>
+        </div>
+        <div id="settingsPageBody"></div>
+        <div class="stacked-actions" style="margin-top:1rem;">
+          <button class="primary-button manager-only" type="button" id="saveSettingsBtn">保存设置</button>
+        </div>
+        <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--line);">
+          <p style="color:var(--ink-soft);font-size:0.74rem;">只读模式下不能修改设置。</p>
+          <p style="color:var(--ink-faint);font-size:0.68rem;">云端账本数据自动同步，不需要在这里备份恢复。</p>
+        </div>
+      </section>
+
     </main>
 
     <!-- 底部导航 -->
@@ -432,6 +464,7 @@
       <button class="nav-button active" data-page="overview" aria-current="page">🏠 概览</button>
       <button class="nav-button" data-page="entry">📝 记录</button>
       <button class="nav-button" data-page="life">⏳ 生命</button>
+      <button class="nav-button" data-page="settings">⚙️ 设置</button>
     </nav>
 
     <!-- Toast -->
