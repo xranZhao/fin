@@ -10,6 +10,15 @@ const response = await handler(JSON.stringify({
 assert.equal(response.statusCode, 200);
 assert.deepEqual(JSON.parse(response.body), { ok: true });
 
+const bufferResponse = await handler(Buffer.from(JSON.stringify({
+  rawPath: "/api/health",
+  headers: {},
+  requestContext: { http: { method: "GET", path: "/api/health", sourceIp: "127.0.0.1" } },
+})), { requestId: "buffer-test-request" });
+
+assert.equal(bufferResponse.statusCode, 200);
+assert.deepEqual(JSON.parse(bufferResponse.body), { ok: true });
+
 const missing = await handler(JSON.stringify({
   rawPath: "/api/state",
   headers: {},

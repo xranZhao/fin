@@ -99,7 +99,9 @@ function requestBody(event) {
 }
 
 function requestInfo(event) {
-  const parsed = typeof event === "string" ? JSON.parse(event) : event;
+  // FC Node.js 20 的 HTTP 触发器会将事件传为 Buffer；本地测试常传字符串。
+  const source = Buffer.isBuffer(event) ? event.toString("utf8") : event;
+  const parsed = typeof source === "string" ? JSON.parse(source) : source;
   return {
     event: parsed,
     method: String(parsed.requestContext?.http?.method || "GET").toUpperCase(),
