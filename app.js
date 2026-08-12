@@ -588,15 +588,15 @@ function renderEntry() {
       byId("csvUploadResult").innerHTML = '已存档原始CSV：' + esc(snap.expense.sourceFileName || "未知文件") + '<br><small style="color:var(--ink-faint)">点击上传可覆盖</small>';
     }
     // 恢复旅游标记
-    byId("travelStart").value = snap.travel?.start || "";
-    byId("travelEnd").value = snap.travel?.end || "";
-    byId("travelDest").value = snap.travel?.dest || "";
+    const legs = snap.travel?.legs || [{ start: snap.travel?.start || "", end: snap.travel?.end || "", dest: snap.travel?.dest || "" }];
+    restoreTravelLegs(legs);
     setText("headerMonthLabel", "编辑已有记录");
   } else {
-    ["spendingBalance","savingsBalanceEntry","suliIncome","suliTransfer","suliKept","chenqianIncome","chenqianTransfer","chenqianKept","confirmedExpense","monthlyNote","travelStart","travelEnd","travelDest"].forEach(id => {
+    ["spendingBalance","savingsBalanceEntry","suliIncome","suliTransfer","suliKept","chenqianIncome","chenqianTransfer","chenqianKept","confirmedExpense","monthlyNote"].forEach(id => {
       const el = byId(id);
       if (el) { if (el.tagName === "TEXTAREA") el.value = ""; else el.value = ""; }
     });
+    restoreTravelLegs([{ start: "", end: "", dest: "" }]);
     setText("headerMonthLabel", "新建月度记录");
   }
 }
@@ -674,9 +674,7 @@ async function saveSnapshot(e) {
       rawCsvFileName: uploadedSummary?.rawCsvFileName || (existing?.expense?.rawCsvFileName || ""),
     },
     travel: {
-      start: (byId("travelStart")?.value || "").trim(),
-      end: (byId("travelEnd")?.value || "").trim(),
-      dest: (byId("travelDest")?.value || "").trim().slice(0, 60),
+      legs: collectTravelLegs(),
     },
     note: (byId("monthlyNote").value || "").trim().slice(0, 200),
   };
@@ -857,25 +855,84 @@ function renderSummary() {
   byId("summaryAdviceList").innerHTML = adv.map((a, i) => '<div class="advice-item"><span class="advice-number">' + (i + 1) + '</span><p>' + esc(a) + '</p></div>').join("");
 }
 
+// ---- 享福辅助函数 ----
+function collectTravelLegs() {
+  const starts = document.querySelectorAll(".travel-start");
+  const ends = document.querySelectorAll(".travel-end");
+  const dests = document.querySelectorAll(".travel-dest");
+  const legs = [];
+  for (let i = 0; i < starts.length; i++) {
+    const s = (starts[i]?.value || "").trim();
+    const e = (ends[i]?.value || "").trim();
+    const d = (dests[i]?.value || "").trim().slice(0, 60);
+    if (s || e || d) legs.push({ start: s, end: e, dest: d });
+  }
+  return legs;
+}
+
+function restoreTravelLegs(legs) {
+  const container = byId("travelLegsContainer");
+  if (!container) return;
+  const existing = container.querySelectorAll(".travel-leg");
+  existing.forEach((el, i) => { if (i > 0) el.remove(); });
+  const valid = (legs || []).filter(l => l.start || l.end || l.dest);
+  const data = valid.length ? valid : [{ start: "", end: "", dest: "" }];
+  data.forEach((leg, i) => {
+    if (i === 0) {
+      const first = existing[0];
+      if (first) {
+        first.querySelector(".travel-start").value = leg.start || "";
+        first.querySelector(".travel-end").value = leg.end || "";
+        first.querySelector(".travel-dest").value = leg.dest || "";
+      }
+    } else {
+      addTravelLegRow(leg);
+    }
+  });
+}
+
+function addTravelLegRow(leg) {
+  const container = byId("travelLegsContainer");
+  if (!container) return;
+  const row = document.createElement("div");
+  row.className = "travel-leg";
+  row.style.cssText = "display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.4rem;align-items:end;margin-bottom:0.4rem;";
+  row.innerHTML =
+    '<div class="field"><input type="date" class="travel-start" value="' + esc(leg?.start || "") + '" aria-label="旅游开始日期"></div>' +
+    '<div class="field"><input type="date" class="travel-end" value="' + esc(leg?.end || "") + '" aria-label="旅游结束日期"></div>' +
+    '<div class="field"><input type="text" class="travel-dest" maxlength="60" value="' + esc(leg?.dest || "") + '" placeholder="莫干山" aria-label="目的地"></div>' +
+    '<button type="button" class="icon-button remove-travel-btn" style="align-self:flex-end;margin-bottom:0.15rem;" title="删除此行">✕</button>';
+  container.appendChild(row);
+  row.querySelector(".remove-travel-btn").addEventListener("click", function () {
+    const all = container.querySelectorAll(".travel-leg");
+    if (all.length <= 1) return;
+    row.remove();
+  });
+}
+
 // ================================================================
 // 7. 享福
 // ================================================================
+// 享福页渲染
 function renderEnjoy() {
   const snaps = sortedSnapshots();
   const months = [...new Set(snaps.map(s => s.month))].sort((a, b) => b.localeCompare(a));
   monthOnlySelect("enjoyMonthSelect", months);
 
   const sn = state.snapshots.find(s => s.month === selectedMonth);
-  const hasTravel = sn && sn.travel?.start && sn.travel?.end;
+  const legs = (sn?.travel?.legs && sn.travel.legs.length)
+    ? sn.travel.legs
+    : (sn?.travel?.start ? [{ start: sn.travel.start, end: sn.travel.end, dest: sn.travel.dest }] : []);
+  const hasTravel = sn && legs.length > 0 && legs.some(l => l.start && l.end);
   byId("enjoyEmpty").hidden = hasTravel;
   byId("enjoyContent").hidden = !hasTravel;
   if (!hasTravel) return;
 
-  // 解码 CSV base64 并解析旅游日消费
-  const travelCategoryBreakdown = {};
-  const travelSubBreakdown = {};
-  let travelTotal = 0;
-  let travelDays = 0;
+  // 遍历所有行程，从 CSV 提取消费
+  const allCat = {};
+  const allSub = {};
+  let allTotal = 0;
+  let allDays = 0;
 
   if (sn.expense.rawCsvBase64) {
     try {
@@ -893,76 +950,63 @@ function renderEnjoy() {
         else if (ch === "\n") { row.push(field.replace(/\r$/, "")); if (row.some(x => x.trim())) rows.push(row); row = []; field = ""; }
         else { field += ch; }
       }
-      // Parse header
       const hdrs = rows[0].map(h => String(h || "").replace(/^﻿/, "").trim());
-      const dateIdx = hdrs.findIndex(h => ["时间","日期","交易时间","记账时间"].includes(h));
-      const typeIdx = hdrs.findIndex(h => ["类型","收支类型","账单类型"].includes(h));
-      const amtIdx = hdrs.findIndex(h => ["金额","金额(元)","金额（元）","交易金额"].includes(h));
-      const catIdx = hdrs.findIndex(h => ["分类","一级分类"].includes(h));
-      const subIdx = hdrs.findIndex(h => ["二级分类","子分类"].includes(h));
+      const dIdx = hdrs.findIndex(h => ["时间","日期","交易时间","记账时间"].includes(h));
+      const tIdx = hdrs.findIndex(h => ["类型","收支类型","账单类型"].includes(h));
+      const aIdx = hdrs.findIndex(h => ["金额","金额(元)","金额（元）","交易金额"].includes(h));
+      const cIdx = hdrs.findIndex(h => ["分类","一级分类"].includes(h));
+      const sIdx = hdrs.findIndex(h => ["二级分类","子分类"].includes(h));
 
-      const startDate = sn.travel.start;
-      const endDate = sn.travel.end;
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      travelDays = Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1;
-
-      rows.slice(1).forEach(row => {
-        if (dateIdx < 0 || typeIdx < 0 || amtIdx < 0) return;
-        const rowMonth = String(row[dateIdx] || "").match(/(20\d{2})[-/.](\d{1,2})/);
-        if (!rowMonth) return;
-        // 提取完整日期
-        const dateMatch = String(row[dateIdx] || "").match(/(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})/);
-        if (!dateMatch) return;
-        const rowDate = new Date(dateMatch[1] + "-" + dateMatch[2] + "-" + dateMatch[3]);
-        if (rowDate < start || rowDate > end) return;
-
-        const type = String(row[typeIdx] || "").trim();
-        if (type !== "支出") return;
-        const amt = Number(String(row[amtIdx] || "0").replace(/[¥￥,\s]/g, ""));
-        if (amt <= 0) return;
-        const cat = String(row[catIdx] || "未分类").trim() || "未分类";
-        const sub = subIdx >= 0 ? String(row[subIdx] || "").trim() : "";
-
-        travelTotal += amt;
-        travelCategoryBreakdown[cat] = (travelCategoryBreakdown[cat] || 0) + amt;
-        if (sub) {
-          if (!travelSubBreakdown[cat]) travelSubBreakdown[cat] = {};
-          travelSubBreakdown[cat][sub] = (travelSubBreakdown[cat][sub] || 0) + amt;
-        }
-      });
-      // Round
-      travelTotal = Math.round(travelTotal * 100) / 100;
-      for (const k of Object.keys(travelCategoryBreakdown)) travelCategoryBreakdown[k] = Math.round(travelCategoryBreakdown[k] * 100) / 100;
-    } catch (e) { /* CSV 解码失败，不显示旅游明细 */ }
+      for (const leg of legs) {
+        if (!leg.start || !leg.end) continue;
+        const st = new Date(leg.start), en = new Date(leg.end);
+        const dCount = Math.round((en - st) / (1000 * 60 * 60 * 24)) + 1;
+        allDays += dCount;
+        rows.slice(1).forEach(r => {
+          if (dIdx < 0 || tIdx < 0 || aIdx < 0) return;
+          const dm = String(r[dIdx] || "").match(/(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})/);
+          if (!dm) return;
+          const rd = new Date(dm[1] + "-" + dm[2] + "-" + dm[3]);
+          if (rd < st || rd > en) return;
+          if (String(r[tIdx] || "").trim() !== "支出") return;
+          const amt = Number(String(r[aIdx] || "0").replace(/[¥￥,\s]/g, ""));
+          if (amt <= 0) return;
+          const cat = String(r[cIdx] || "未分类").trim() || "未分类";
+          const sub = sIdx >= 0 ? String(r[sIdx] || "").trim() : "";
+          allTotal += amt;
+          allCat[cat] = (allCat[cat] || 0) + amt;
+          if (sub) { if (!allSub[cat]) allSub[cat] = {}; allSub[cat][sub] = (allSub[cat][sub] || 0) + amt; }
+        });
+      }
+      allTotal = Math.round(allTotal * 100) / 100;
+      for (const k of Object.keys(allCat)) allCat[k] = Math.round(allCat[k] * 100) / 100;
+    } catch (e) { /* CSV 解码失败 */ }
   }
 
-  // 渲染
-  byId("enjoyDest").textContent = sn.travel.dest || (startDate + " ～ " + endDate);
-  byId("enjoyTotal").textContent = money(travelTotal);
-  byId("enjoyAvg").textContent = travelDays > 0 ? money(travelTotal / travelDays) : money(0);
+  const destNames = legs.filter(l => l.dest).map(l => l.dest).join(" · ") || "未指定目的地";
+  byId("enjoyDest").textContent = destNames;
+  byId("enjoyTotal").textContent = money(allTotal);
+  byId("enjoyAvg").textContent = allDays > 0 ? money(allTotal / allDays) : money(0);
 
-  renderCategoryList("enjoyCategoryList", travelCategoryBreakdown, 0);
-  if (byId("enjoyDetailList")) renderSubcategoryDetail("enjoyDetailList", travelSubBreakdown, travelCategoryBreakdown);
+  renderCategoryList("enjoyCategoryList", allCat, 0);
+  if (byId("enjoyDetailList")) renderSubcategoryDetail("enjoyDetailList", allSub, allCat);
 
-  // 生命能量
   const fm = getLifeMetrics(sn);
   const hourly = fm.familyHourlyRate;
   if (hourly > 0) {
-    const lifeHr = travelTotal / hourly;
+    const lifeHr = allTotal / hourly;
     setText("enjoyLifeHours", numFmt.format(lifeHr));
     setText("enjoyLifeDays", numFmt.format(lifeHr / 8));
-    const lostWage = hourly * 8 * travelDays;
+    const lostWage = hourly * 8 * allDays;
     setText("enjoyLostWage", money(lostWage));
-    // 判决
+    const avgPerDay = allTotal / Math.max(allDays, 1);
     const verdictEl = byId("enjoyVerdict");
-    const avgPerDay = travelTotal / Math.max(travelDays, 1);
     if (avgPerDay < hourly * 3) {
-      verdictEl.innerHTML = '这趟旅游日均 ' + money(avgPerDay) + '，不到半天工资。' + esc(sn.travel.dest || "这趟") + '——<strong>太值了。</strong>下次还去。';
+      verdictEl.innerHTML = '这' + legs.length + '趟旅行日均 ' + money(avgPerDay) + '，不到半天工资——<strong>太值了。</strong>';
     } else if (avgPerDay < hourly * 8) {
-      verdictEl.innerHTML = '这趟旅游日均 ' + money(avgPerDay) + '，差不多一天工资。' + esc(sn.travel.dest || "旅途") + '换来的回忆——<strong>值。</strong>';
+      verdictEl.innerHTML = '这' + legs.length + '趟旅行日均 ' + money(avgPerDay) + '，差不多一天工资——<strong>值。</strong>';
     } else {
-      verdictEl.innerHTML = '这趟旅游日均 ' + money(avgPerDay) + '，超过一天工资。但回忆无价——只要两个人都开心，<strong>就值。</strong>';
+      verdictEl.innerHTML = '这' + legs.length + '趟旅行日均 ' + money(avgPerDay) + '，超过一天工资。回忆无价——<strong>只要两个人都开心就值。</strong>';
     }
   } else {
     setText("enjoyLifeHours", "—（请先在设置中填写工作资料）");
@@ -1273,6 +1317,10 @@ async function init() {
 
   // PWA
   window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferredInstallPrompt = e; });
+
+  // 享福：添加行程行
+  const addTravelBtn = byId("addTravelLegBtn");
+  if (addTravelBtn) addTravelBtn.addEventListener("click", () => addTravelLegRow({ start: "", end: "", dest: "" }));
 
   // 初始渲染
   renderOverview();

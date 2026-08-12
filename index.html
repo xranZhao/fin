@@ -220,21 +220,16 @@
           <!-- 享福标记 -->
           <fieldset class="form-section manager-only">
             <legend>享福 · 旅游标记</legend>
-            <p style="color:var(--ink-soft);font-size:0.7rem;margin-bottom:0.5rem;">标记本月哪些天出去旅游了，享福板块会单独拉出这些天的开销。</p>
-            <div class="field-grid two-columns">
-              <div class="field">
-                <span>旅游开始日期</span>
-                <input type="date" id="travelStart" aria-label="旅游开始日期">
-              </div>
-              <div class="field">
-                <span>旅游结束日期</span>
-                <input type="date" id="travelEnd" aria-label="旅游结束日期">
+            <p style="color:var(--ink-soft);font-size:0.7rem;margin-bottom:0.5rem;">一个月去了好几个地方？可以添加多段行程。</p>
+            <div id="travelLegsContainer">
+              <div class="travel-leg" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.4rem;align-items:end;margin-bottom:0.4rem;">
+                <div class="field"><span>开始日期</span><input type="date" class="travel-start" aria-label="旅游开始日期"></div>
+                <div class="field"><span>结束日期</span><input type="date" class="travel-end" aria-label="旅游结束日期"></div>
+                <div class="field"><span>目的地</span><input type="text" class="travel-dest" maxlength="60" placeholder="莫干山"></div>
+                <button type="button" class="icon-button remove-travel-btn" style="align-self:flex-end;margin-bottom:0.15rem;" title="删除此行">✕</button>
               </div>
             </div>
-            <div class="field" style="margin-top:0.4rem;">
-              <span>目的地（选填）</span>
-              <input type="text" id="travelDest" maxlength="60" placeholder="比如：莫干山、东湖">
-            </div>
+            <button type="button" class="secondary-button" id="addTravelLegBtn" style="margin-top:0.4rem;font-size:0.72rem;">+ 添加一段行程</button>
           </fieldset>
 
           <div class="form-actions manager-only">

@@ -187,9 +187,13 @@ function normalizeSnapshot(snapshot = {}) {
       rawCsvFileName: String(snapshot.expense?.rawCsvFileName || "").slice(0, 180),
     },
     travel: {
-      start: /^\d{4}-\d{2}-\d{2}$/.test(snapshot.travel?.start || "") ? snapshot.travel.start : "",
-      end: /^\d{4}-\d{2}-\d{2}$/.test(snapshot.travel?.end || "") ? snapshot.travel.end : "",
-      dest: String(snapshot.travel?.dest || "").slice(0, 60),
+      legs: Array.isArray(snapshot.travel?.legs)
+        ? snapshot.travel.legs.map(l => ({
+            start: /^\d{4}-\d{2}-\d{2}$/.test(l?.start || "") ? l.start : "",
+            end: /^\d{4}-\d{2}-\d{2}$/.test(l?.end || "") ? l.end : "",
+            dest: String(l?.dest || "").slice(0, 60),
+          })).filter(l => l.start || l.end || l.dest)
+        : [],
     },
     note: String(snapshot.note || "").slice(0, 200),
     createdAt: snapshot.createdAt || now,
