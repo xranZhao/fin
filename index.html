@@ -217,6 +217,26 @@
             <textarea id="monthlyNote" rows="2" maxlength="200" placeholder="200 字以内的异常说明或大事备忘"></textarea>
           </fieldset>
 
+          <!-- 享福标记 -->
+          <fieldset class="form-section manager-only">
+            <legend>享福 · 旅游标记</legend>
+            <p style="color:var(--ink-soft);font-size:0.7rem;margin-bottom:0.5rem;">标记本月哪些天出去旅游了，享福板块会单独拉出这些天的开销。</p>
+            <div class="field-grid two-columns">
+              <div class="field">
+                <span>旅游开始日期</span>
+                <input type="date" id="travelStart" aria-label="旅游开始日期">
+              </div>
+              <div class="field">
+                <span>旅游结束日期</span>
+                <input type="date" id="travelEnd" aria-label="旅游结束日期">
+              </div>
+            </div>
+            <div class="field" style="margin-top:0.4rem;">
+              <span>目的地（选填）</span>
+              <input type="text" id="travelDest" maxlength="60" placeholder="比如：莫干山、东湖">
+            </div>
+          </fieldset>
+
           <div class="form-actions manager-only">
             <button type="button" class="danger-button" id="deleteSnapshotButton">删除本月</button>
             <button type="submit" class="primary-button" id="saveSnapshotButton">保存本月记录</button>
@@ -439,7 +459,58 @@
         </div>
       </section>
 
-      <!-- ====== 6. 设置 ====== -->
+      <!-- ====== 6. 享福 ====== -->
+      <section class="page" id="enjoyPage" data-page="enjoy">
+        <div class="page-heading">
+          <div>
+            <p class="kicker">赚了钱也要好好享受生活</p>
+            <h1>享福</h1>
+          </div>
+          <label class="month-picker compact-field">
+            <span>查看月份</span>
+            <select id="enjoyMonthSelect" aria-label="选择查看月份"></select>
+          </label>
+        </div>
+
+        <div class="empty-state" id="enjoyEmpty">
+          <p class="empty-title">这个月还没标记旅游</p>
+          <p>在月度记录里标记旅游日期，这里就能看到花了多少钱、换了多少时间、值不值得。</p>
+        </div>
+
+        <div id="enjoyContent" hidden>
+          <!-- 旅游概览 -->
+          <section class="card card-spacious" style="text-align:center;">
+            <span class="life-hero-label" id="enjoyDest">—</span>
+            <span class="life-hero-number" id="enjoyTotal">¥0</span>
+            <span class="life-hero-label">天 · 日均 <strong id="enjoyAvg">¥0</strong></span>
+          </section>
+
+          <!-- 分类拆解 -->
+          <section class="card card-spacious">
+            <h2>旅游花了什么</h2>
+            <div class="category-list" id="enjoyCategoryList"></div>
+          </section>
+
+          <!-- 二级分类明细 -->
+          <section class="card card-spacious" id="enjoyDetailSection">
+            <h2>具体花在哪</h2>
+            <div id="enjoyDetailList"></div>
+          </section>
+
+          <!-- 生命交换 -->
+          <section class="card card-spacious">
+            <h2>这几天换走了多少时间</h2>
+            <div style="text-align:center;">
+              <p style="font-family:var(--font-title);font-size:1.6rem;margin:0.3rem 0;" id="enjoyLifeHours">—</p>
+              <p style="color:var(--ink-soft);font-size:0.74rem;">小时（约 <strong id="enjoyLifeDays">—</strong> 个工作日）</p>
+              <p style="color:var(--ink-soft);font-size:0.74rem;">放弃的工资：<strong id="enjoyLostWage">¥0</strong></p>
+            </div>
+            <div class="life-summary" id="enjoyVerdict"></div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ====== 7. 设置 ====== -->
       <section class="page" id="settingsPage" data-page="settings" style="padding-bottom:2rem;">
         <div class="page-heading">
           <div>
@@ -464,7 +535,8 @@
       <button class="nav-button active" data-page="overview" aria-current="page">🏠 概览</button>
       <button class="nav-button" data-page="entry">📝 记录</button>
       <button class="nav-button" data-page="life">⏳ 生命</button>
-      <button class="nav-button" data-page="settings">⚙️ 设置</button>
+      <button class="nav-button" data-page="enjoy" style="font-size:0.7rem;">🎉 享福</button>
+      <button class="nav-button" data-page="settings" style="font-size:0.7rem;">⚙️ 设置</button>
     </nav>
 
     <!-- Toast -->

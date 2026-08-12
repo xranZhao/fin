@@ -940,7 +940,7 @@ textarea { resize: vertical; line-height: 1.5; }
   z-index: 25;
   right: 0; bottom: 0; left: 0;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   width: min(100%, var(--content-width));
   margin: 0 auto;
   padding: 0.45rem 0.7rem max(0.45rem, env(safe-area-inset-bottom));
@@ -956,8 +956,9 @@ textarea { resize: vertical; line-height: 1.5; }
   background: transparent;
   border: 0;
   border-radius: 10px;
-  font-size: 0.76rem;
+  font-size: 0.7rem;
   font-weight: 550;
+  padding: 0.2rem 0.15rem;
   transition: color 180ms ease, background-color 180ms ease;
 }
 .nav-button.active {

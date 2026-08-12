@@ -258,6 +258,7 @@ function navigateTo(pageName) {
   else if (pageName === "analysis") { renderAnalysis(); setText("headerMonthLabel", "支出分析"); }
   else if (pageName === "summary") { renderSummary(); setText("headerMonthLabel", "家庭财务总结"); }
   else if (pageName === "settings") { renderSettingsPage(); setText("headerMonthLabel", "家庭设置"); }
+  else if (pageName === "enjoy") { renderEnjoy(); setText("headerMonthLabel", "享福"); }
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -588,14 +589,17 @@ function renderEntry() {
     byId("monthlyNote").value = snap.note || "";
     if (snap.expense.autoTotal && snap.expense.sourceFileName) showCsvResult(snap);
     if (snap.expense.rawCsvBase64) {
-      // 已有存档CSV
       byId("csvUploadResult").hidden = false;
       byId("csvUploadResult").className = "upload-result";
-      byId("csvUploadResult").innerHTML = `已存档原始CSV：${snap.expense.sourceFileName || "未知文件"}<br><small style="color:var(--ink-faint)">点击上传可覆盖</small>`;
+      byId("csvUploadResult").innerHTML = '已存档原始CSV：' + esc(snap.expense.sourceFileName || "未知文件") + '<br><small style="color:var(--ink-faint)">点击上传可覆盖</small>';
     }
+    // 恢复旅游标记
+    byId("travelStart").value = snap.travel?.start || "";
+    byId("travelEnd").value = snap.travel?.end || "";
+    byId("travelDest").value = snap.travel?.dest || "";
     setText("headerMonthLabel", "编辑已有记录");
   } else {
-    ["spendingBalance","savingsBalanceEntry","suliIncome","suliTransfer","suliKept","chenqianIncome","chenqianTransfer","chenqianKept","confirmedExpense","monthlyNote"].forEach(id => {
+    ["spendingBalance","savingsBalanceEntry","suliIncome","suliTransfer","suliKept","chenqianIncome","chenqianTransfer","chenqianKept","confirmedExpense","monthlyNote","travelStart","travelEnd","travelDest"].forEach(id => {
       const el = byId(id);
       if (el) { if (el.tagName === "TEXTAREA") el.value = ""; else el.value = ""; }
     });
@@ -674,6 +678,11 @@ async function saveSnapshot(e) {
       importedAt: uploadedSummary?.importedAt || (existing?.expense?.importedAt || ""),
       rawCsvBase64: uploadedSummary?.rawCsvBase64 || (existing?.expense?.rawCsvBase64 || ""),
       rawCsvFileName: uploadedSummary?.rawCsvFileName || (existing?.expense?.rawCsvFileName || ""),
+    },
+    travel: {
+      start: (byId("travelStart")?.value || "").trim(),
+      end: (byId("travelEnd")?.value || "").trim(),
+      dest: (byId("travelDest")?.value || "").trim().slice(0, 60),
     },
     note: (byId("monthlyNote").value || "").trim().slice(0, 200),
   };
@@ -851,7 +860,119 @@ function renderSummary() {
   if (m.operatingBalance >= 0) adv.push(`经营结余 ${money(m.operatingBalance)}，财务状况健康。`);
   else adv.push(`经营赤字 ${money(Math.abs(m.operatingBalance))}，确认是否有大额一次性支出。`);
   adv.push(`家庭储蓄率 ${numFmt.format(m.transferRate * 100)}%，两人共转入 ${money(m.totalTransfer)}。`);
-  byId("summaryAdviceList").innerHTML = adv.map((a, i) => `<div class="advice-item"><span class="advice-number">${i + 1}</span><p>${esc(a)}</p></div>`).join("");
+  byId("summaryAdviceList").innerHTML = adv.map((a, i) => '<div class="advice-item"><span class="advice-number">' + (i + 1) + '</span><p>' + esc(a) + '</p></div>').join("");
+}
+
+// ================================================================
+// 7. 享福
+// ================================================================
+function renderEnjoy() {
+  const snaps = sortedSnapshots();
+  const months = [...new Set(snaps.map(s => s.month))].sort((a, b) => b.localeCompare(a));
+  monthOnlySelect("enjoyMonthSelect", months);
+
+  const sn = state.snapshots.find(s => s.month === selectedMonth);
+  const hasTravel = sn && sn.travel?.start && sn.travel?.end;
+  byId("enjoyEmpty").hidden = hasTravel;
+  byId("enjoyContent").hidden = !hasTravel;
+  if (!hasTravel) return;
+
+  // 解码 CSV base64 并解析旅游日消费
+  const travelCategoryBreakdown = {};
+  const travelSubBreakdown = {};
+  let travelTotal = 0;
+  let travelDays = 0;
+
+  if (sn.expense.rawCsvBase64) {
+    try {
+      const csvText = atob(sn.expense.rawCsvBase64);
+      const rows = [];
+      let row = [], field = "", quoted = false;
+      for (let i = 0; i < csvText.length; i++) {
+        const ch = csvText[i];
+        if (quoted) {
+          if (ch === '"' && csvText[i + 1] === '"') { field += '"'; i++; }
+          else if (ch === '"') { quoted = false; }
+          else { field += ch; }
+        } else if (ch === '"') { quoted = true; }
+        else if (ch === ",") { row.push(field); field = ""; }
+        else if (ch === "\n") { row.push(field.replace(/\r$/, "")); if (row.some(x => x.trim())) rows.push(row); row = []; field = ""; }
+        else { field += ch; }
+      }
+      // Parse header
+      const hdrs = rows[0].map(h => String(h || "").replace(/^﻿/, "").trim());
+      const dateIdx = hdrs.findIndex(h => ["时间","日期","交易时间","记账时间"].includes(h));
+      const typeIdx = hdrs.findIndex(h => ["类型","收支类型","账单类型"].includes(h));
+      const amtIdx = hdrs.findIndex(h => ["金额","金额(元)","金额（元）","交易金额"].includes(h));
+      const catIdx = hdrs.findIndex(h => ["分类","一级分类"].includes(h));
+      const subIdx = hdrs.findIndex(h => ["二级分类","子分类"].includes(h));
+
+      const startDate = sn.travel.start;
+      const endDate = sn.travel.end;
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      travelDays = Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1;
+
+      rows.slice(1).forEach(row => {
+        if (dateIdx < 0 || typeIdx < 0 || amtIdx < 0) return;
+        const rowMonth = String(row[dateIdx] || "").match(/(20\d{2})[-/.](\d{1,2})/);
+        if (!rowMonth) return;
+        // 提取完整日期
+        const dateMatch = String(row[dateIdx] || "").match(/(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})/);
+        if (!dateMatch) return;
+        const rowDate = new Date(dateMatch[1] + "-" + dateMatch[2] + "-" + dateMatch[3]);
+        if (rowDate < start || rowDate > end) return;
+
+        const type = String(row[typeIdx] || "").trim();
+        if (type !== "支出") return;
+        const amt = Number(String(row[amtIdx] || "0").replace(/[¥￥,\s]/g, ""));
+        if (amt <= 0) return;
+        const cat = String(row[catIdx] || "未分类").trim() || "未分类";
+        const sub = subIdx >= 0 ? String(row[subIdx] || "").trim() : "";
+
+        travelTotal += amt;
+        travelCategoryBreakdown[cat] = (travelCategoryBreakdown[cat] || 0) + amt;
+        if (sub) {
+          if (!travelSubBreakdown[cat]) travelSubBreakdown[cat] = {};
+          travelSubBreakdown[cat][sub] = (travelSubBreakdown[cat][sub] || 0) + amt;
+        }
+      });
+      // Round
+      travelTotal = Math.round(travelTotal * 100) / 100;
+      for (const k of Object.keys(travelCategoryBreakdown)) travelCategoryBreakdown[k] = Math.round(travelCategoryBreakdown[k] * 100) / 100;
+    } catch (e) { /* CSV 解码失败，不显示旅游明细 */ }
+  }
+
+  // 渲染
+  byId("enjoyDest").textContent = sn.travel.dest || (startDate + " ～ " + endDate);
+  byId("enjoyTotal").textContent = money(travelTotal);
+  byId("enjoyAvg").textContent = travelDays > 0 ? money(travelTotal / travelDays) : money(0);
+
+  renderCategoryList("enjoyCategoryList", travelCategoryBreakdown, 0);
+  if (byId("enjoyDetailList")) renderSubcategoryDetail("enjoyDetailList", travelSubBreakdown, travelCategoryBreakdown);
+
+  // 生命能量
+  const fm = getLifeMetrics(sn);
+  const hourly = fm.familyHourlyRate;
+  if (hourly > 0) {
+    const lifeHr = travelTotal / hourly;
+    setText("enjoyLifeHours", numFmt.format(lifeHr));
+    setText("enjoyLifeDays", numFmt.format(lifeHr / 8));
+    const lostWage = hourly * 8 * travelDays;
+    setText("enjoyLostWage", money(lostWage));
+    // 判决
+    const verdictEl = byId("enjoyVerdict");
+    const avgPerDay = travelTotal / Math.max(travelDays, 1);
+    if (avgPerDay < hourly * 3) {
+      verdictEl.innerHTML = '这趟旅游日均 ' + money(avgPerDay) + '，不到半天工资。' + esc(sn.travel.dest || "这趟") + '——<strong>太值了。</strong>下次还去。';
+    } else if (avgPerDay < hourly * 8) {
+      verdictEl.innerHTML = '这趟旅游日均 ' + money(avgPerDay) + '，差不多一天工资。' + esc(sn.travel.dest || "旅途") + '换来的回忆——<strong>值。</strong>';
+    } else {
+      verdictEl.innerHTML = '这趟旅游日均 ' + money(avgPerDay) + '，超过一天工资。但回忆无价——只要两个人都开心，<strong>就值。</strong>';
+    }
+  } else {
+    setText("enjoyLifeHours", "—（请先在设置中填写工作资料）");
+  }
 }
 
 // ================================================================

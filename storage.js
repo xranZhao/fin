@@ -183,6 +183,13 @@ function normalizeSnapshot(snapshot = {}) {
         ? snapshot.expense.sourceMonths.filter((item) => /^\d{4}-(0[1-9]|1[0-2])$/.test(item)).slice(0, 24)
         : [],
       importedAt: snapshot.expense?.importedAt || "",
+      rawCsvBase64: String(snapshot.expense?.rawCsvBase64 || "").slice(0, 500000),
+      rawCsvFileName: String(snapshot.expense?.rawCsvFileName || "").slice(0, 180),
+    },
+    travel: {
+      start: /^\d{4}-\d{2}-\d{2}$/.test(snapshot.travel?.start || "") ? snapshot.travel.start : "",
+      end: /^\d{4}-\d{2}-\d{2}$/.test(snapshot.travel?.end || "") ? snapshot.travel.end : "",
+      dest: String(snapshot.travel?.dest || "").slice(0, 60),
     },
     note: String(snapshot.note || "").slice(0, 200),
     createdAt: snapshot.createdAt || now,
