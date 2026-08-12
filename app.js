@@ -31,6 +31,7 @@ let settingsDirty = false;
 let cloudMode = false;
 let cloudAdapter = null;
 let cloudSession = null;
+let skipNextSettingsSave = false;
 
 function money(v) { return moneyFmt.format(Number(v) || 0).replace("CN¥", "¥"); }
 function num(v) { return numFmt.format(Number(v) || 0); }
@@ -721,6 +722,7 @@ function openSettings() {
       const text = await e.target.files[0].text();
       state = importState(text);
       await syncCloudState();
+      skipNextSettingsSave = true;
       byId("settingsDialog").close();
       showToast("备份已恢复，页面即将刷新");
       setTimeout(() => location.reload(), 500);
@@ -910,6 +912,14 @@ async function init() {
 
   // 设置对话框关闭时保存并刷新
   byId("settingsDialog").addEventListener("close", async () => {
+    if (skipNextSettingsSave) {
+      skipNextSettingsSave = false;
+      if (currentPage === "overview") renderOverview();
+      else if (currentPage === "life") renderLife();
+      else if (currentPage === "analysis") renderAnalysis();
+      else if (currentPage === "summary") renderSummary();
+      return;
+    }
     await saveSettingsFromDialog();
     if (currentPage === "overview") renderOverview();
     else if (currentPage === "life") renderLife();
