@@ -582,7 +582,7 @@ function renderEntry() {
     byId("confirmedExpense").value = snap.expense.confirmedTotal || "";
     byId("monthlyNote").value = snap.note || "";
     if (snap.expense.autoTotal && snap.expense.sourceFileName) showCsvResult(snap);
-    if (snap.expense.rawCsv) {
+    if (snap.expense.rawCsvBase64) {
       byId("csvUploadResult").hidden = false;
       byId("csvUploadResult").className = "upload-result";
       byId("csvUploadResult").innerHTML = '已存档原始CSV：' + esc(snap.expense.sourceFileName || "未知文件") + '<br><small style="color:var(--ink-faint)">点击上传可覆盖</small>';
@@ -607,7 +607,7 @@ function showCsvResult(snap) {
   el.className = "upload-result";
   const cats = snap.expense.categoryBreakdown || {};
   const top3 = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${money(v)}`).join(" · ");
-  el.innerHTML = `已解析 ${snap.expense.sourceFileName || ""}<br>${snap.expense.recordCount} 笔 · 合计 ${money(snap.expense.confirmedTotal)}<br>${top3 || "无分类数据"}${snap.expense.rawCsv ? '<br><small style="color:var(--ink-faint)">原始CSV已存档</small>' : ''}`;
+  el.innerHTML = `已解析 ${snap.expense.sourceFileName || ""}<br>${snap.expense.recordCount} 笔 · 合计 ${money(snap.expense.confirmedTotal)}<br>${top3 || "无分类数据"}${snap.expense.rawCsvBase64 ? '<br><small style="color:var(--ink-faint)">原始CSV已存档</small>' : ''}`;
   byId("confirmedExpense").value = snap.expense.confirmedTotal;
 }
 
@@ -625,7 +625,7 @@ async function handleCsvUpload(file) {
     // 保存原始CSV base64
     const rawBuffer = await file.arrayBuffer();
     const rawBase64 = btoa(String.fromCharCode(...new Uint8Array(rawBuffer)));
-    uploadedSummary.rawCsv = rawBase64;
+    uploadedSummary.rawCsvBase64 = rawBase64;
     uploadedSummary.rawCsvFileName = file.name;
 
     const cats = summary.categoryBreakdown || {};
@@ -670,7 +670,7 @@ async function saveSnapshot(e) {
       sourceFileName: uploadedSummary?.sourceFileName || (existing?.expense?.sourceFileName || ""),
       sourceMonths: uploadedSummary?.sourceMonths || (existing?.expense?.sourceMonths || []),
       importedAt: uploadedSummary?.importedAt || (existing?.expense?.importedAt || ""),
-      rawCsv: uploadedSummary?.rawCsv || (existing?.expense?.rawCsv || ""),
+      rawCsvBase64: uploadedSummary?.rawCsvBase64 || (existing?.expense?.rawCsvBase64 || ""),
       rawCsvFileName: uploadedSummary?.rawCsvFileName || (existing?.expense?.rawCsvFileName || ""),
     },
     travel: {
@@ -934,9 +934,9 @@ function renderEnjoy() {
   let allTotal = 0;
   let allDays = 0;
 
-  if (sn.expense.rawCsv) {
+  if (sn.expense.rawCsvBase64) {
     try {
-      const csvText = atob(sn.expense.rawCsv);
+      const csvText = atob(sn.expense.rawCsvBase64);
       const rows = [];
       let row = [], field = "", quoted = false;
       for (let i = 0; i < csvText.length; i++) {
