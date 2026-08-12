@@ -64,7 +64,7 @@ If-Match: "ETag 值"
 服务端校验：
 
 - 请求正文不超过 256 KB。
-- `schemaVersion=1`。
+- `schemaVersion=1` 或 `schemaVersion=2`；当前客户端默认写入 `2`。
 - 月份唯一且格式正确。
 - 金额非负，字符串和数组长度受限。
 - JSON 中不得出现密码、AccessKey、银行卡号或原始交易行字段。
