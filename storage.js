@@ -10,7 +10,7 @@ export const DEFAULT_STATE = Object.freeze({
     role: "manager",
     people: {
       suli: {
-        name: "酥梨",
+        name: "欣然",
         workProfile: {
           referenceMonthlyIncome: 0,
           workDaysPerMonth: 22,
@@ -136,7 +136,7 @@ function normalizeSettings(settings = {}) {
     theme: allowedThemes.has(settings.theme) ? settings.theme : "system",
     role: allowedRoles.has(settings.role) ? settings.role : "manager",
     people: {
-      suli: normalizePerson(settings.people?.suli, "酥梨"),
+      suli: normalizePerson(settings.people?.suli, "欣然"),
       chenqian: normalizePerson(settings.people?.chenqian, "陈前"),
     },
   };
@@ -208,7 +208,7 @@ export function normalizeState(input = {}) {
       ...rawSettings,
       people: {
         suli: {
-          name: rawPeople.suli?.name || "酥梨",
+          name: rawPeople.suli?.name || "欣然",
           workProfile: migrateWorkProfileV1toV2(v1Suli),
         },
         chenqian: {

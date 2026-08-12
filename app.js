@@ -192,7 +192,7 @@ function withDemoData() {
       people: {
         suli: {
           ...state.settings.people.suli,
-          name: "酥梨",
+          name: "欣然",
           workProfile: {
             ...state.settings.people.suli.workProfile,
             referenceMonthlyIncome: 8800, workDaysPerMonth: 22, workHoursPerDay: 8,
@@ -693,12 +693,12 @@ function openSettings() {
     <div class="settings-group">
       <h3>显示名称</h3>
       <div class="field-grid dual-input">
-        <div class="field"><span>酥梨</span><input type="text" id="setSuliName" value="${esc(su.name)}" maxlength="20"></div>
+        <div class="field"><span>欣然</span><input type="text" id="setSuliName" value="${esc(su.name)}" maxlength="20"></div>
         <div class="field"><span>陈前</span><input type="text" id="setChenqianName" value="${esc(cq.name)}" maxlength="20"></div>
       </div>
     </div>
     <div class="settings-group">
-      <h3>酥梨 · 工作资料</h3>
+      <h3>欣然 · 工作资料</h3>
       ${wpFields("suli", su.workProfile)}
       <div class="calc-preview" id="calcPreviewSuli"></div>
     </div>
@@ -796,7 +796,7 @@ async function saveSettingsFromDialog() {
     savingsGoal: safeNum(byId("setSavingsGoal")?.value) || 100000,
     people: {
       suli: {
-        name: (byId("setSuliName")?.value || "").trim().slice(0, 20) || "酥梨",
+        name: (byId("setSuliName")?.value || "").trim().slice(0, 20) || "欣然",
         workProfile: readWorkProfile("suli"),
       },
       chenqian: {
