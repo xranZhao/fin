@@ -752,8 +752,10 @@ async function saveSnapshot(e) {
 
   state = upsertSnapshot(state, snap);
   syncDirty = true;
-  try { await syncCloudState(); } catch { /* syncCloudState 已 toast */ }
-  showToast(`${monthLabel(month)} 已保存`, "success");
+  let synced = false;
+  try { await syncCloudState(); synced = true; } catch { /* syncCloudState 已 toast */ }
+  if (synced) showToast(`${monthLabel(month)} 已保存`, "success");
+  else showToast(`${monthLabel(month)} 已保存到本机（云端未同步）`, "warning");
   navigateTo("overview");
 }
 
