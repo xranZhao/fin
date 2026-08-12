@@ -74,26 +74,19 @@ async function syncCloudState() {
     showToast("已同步到家庭云端");
   } catch (error) {
     if (error.status === 409) {
-      // 自动重新加载云端数据，合并本地新录入
       showToast("云端已被更新，正在自动合并…");
       try {
+        // 全量合并：拉取最新 → 本地月份覆盖云端同月 → 追加新月份
         const fresh = await cloudAdapter.load();
-        // 合并：保留本地月份中云端没有的，覆盖云端已有的
-        const merged = fresh;
+        const mergedMap = new Map(fresh.snapshots.map(s => [s.month, s]));
         for (const localSnap of state.snapshots) {
-          const existingIdx = merged.snapshots.findIndex(s => s.month === localSnap.month);
-          if (existingIdx >= 0) {
-            // 本地覆盖云端（用户已确认）
-            merged.snapshots[existingIdx] = localSnap;
-          } else {
-            merged.snapshots.push(localSnap);
-          }
+          mergedMap.set(localSnap.month, localSnap);
         }
-        merged.snapshots.sort((a, b) => a.month.localeCompare(b.month));
-        state = await cloudAdapter.save(merged);
+        fresh.snapshots = [...mergedMap.values()].sort((a, b) => a.month.localeCompare(b.month));
+        state = await cloudAdapter.save(fresh);
         showToast("已自动合并并同步到云端");
       } catch (retryErr) {
-        showToast("自动合并失败，请重新加载页面后重试");
+        showToast("合并失败，请稍后重新保存");
         throw retryErr;
       }
     } else {
@@ -141,13 +134,13 @@ async function setupCloudMode() {
   } catch {
     return;
   }
-  cloudMode = true;
   const token = readCloudToken();
   if (!token) { openCloudLogin(); return; }
   cloudAdapter = new RemoteStateAdapter(cloudApiBase, token);
   const sessionResponse = await fetch(cloudUrl("/api/session"), { headers: { Authorization: `Bearer ${token}` } });
   if (sessionResponse.ok) {
     cloudSession = await sessionResponse.json();
+    cloudMode = true;
     try {
       await loadCloudStateAfterLogin();
     } catch (error) {
@@ -156,6 +149,7 @@ async function setupCloudMode() {
   } else {
     clearCloudToken();
     cloudAdapter = null;
+    cloudMode = false;
     openCloudLogin();
   }
 }
@@ -1004,14 +998,6 @@ function renderSettingsPage() {
       </div>
     </div>
     <div class="card card-spacious">
-      <h2>显示名称</h2>
-      <br>
-      <div class="field-grid dual-input">
-        <div class="field"><span>欣然</span><input type="text" id="setSuliName" value="${esc(su.name)}"${d} maxlength="20"></div>
-        <div class="field"><span>陈前</span><input type="text" id="setChenqianName" value="${esc(cq.name)}"${d} maxlength="20"></div>
-      </div>
-    </div>
-    <div class="card card-spacious">
       <h2>欣然 · 工作资料</h2>
       <br>
       ${wpFields("suli", su.workProfile, d)}
@@ -1071,15 +1057,15 @@ function saveSettingsFromPage() {
     monthlyBudget: safeNum(byId("setBudget")?.value) || 3000,
     savingsGoal: safeNum(byId("setSavingsGoal")?.value) || 100000,
     people: {
-      suli: { name: (byId("setSuliName")?.value || "").trim().slice(0, 20) || "欣然", workProfile: readWorkProfile("suli") },
-      chenqian: { name: (byId("setChenqianName")?.value || "").trim().slice(0, 20) || "陈前", workProfile: readWorkProfile("chenqian") },
+      suli: { name: "欣然", workProfile: readWorkProfile("suli") },
+      chenqian: { name: "陈前", workProfile: readWorkProfile("chenqian") },
     },
   };
   state = saveSettings(state, ns);
   applyTheme();
   applyRole();
   showToast("设置已保存");
-  (async () => { try { await syncCloudState(); } catch {} })();
+  setTimeout(function() { syncCloudState().catch(function() {}); }, 100);
 }
 
 // ================================================================
@@ -1132,11 +1118,11 @@ async function saveSettingsFromDialog() {
     savingsGoal: safeNum(byId("setSavingsGoal")?.value) || 100000,
     people: {
       suli: {
-        name: (byId("setSuliName")?.value || "").trim().slice(0, 20) || "欣然",
+        name: "欣然",
         workProfile: readWorkProfile("suli"),
       },
       chenqian: {
-        name: (byId("setChenqianName")?.value || "").trim().slice(0, 20) || "陈前",
+        name: "陈前",
         workProfile: readWorkProfile("chenqian"),
       },
     },
@@ -1189,8 +1175,19 @@ async function logoutCloud() {
 // 初始化
 // ================================================================
 async function init() {
-  await setupCloudMode();
-  if (!cloudMode) withDemoData();
+  // 先读本地数据（永远有，不会丢）
+  state = loadState();
+
+  // 尝试挂云端
+  try {
+    await setupCloudMode();
+  } catch {
+    // 云端连接失败或 token 过期都不要紧——本地数据还在
+  }
+
+  // demo 模式：仅当 URL 带了 ?demo=1 才启用
+  withDemoData();
+
   applyTheme();
   applyRole();
 
