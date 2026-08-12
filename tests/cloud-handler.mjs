@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { handler } from "../cloud/index.mjs";
+import { handler } from "../index.js";
 
 const response = await handler(JSON.stringify({
   rawPath: "/api/health",
