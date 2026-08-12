@@ -341,24 +341,45 @@ function renderSubcategoryDetail(containerId, subBreakdown, catBreakdown) {
   el.innerHTML = html;
 }
 
-// ---- AI 智能诊断 ----
+// ---- AI 智能诊断（基于CSV数据，不做武断判断）----
 function renderAIDiagnosis(sn, hourlyRate) {
   const el = byId("analysisAIDiagnosis");
   if (!el) return;
   const cats = sn.expense.categoryBreakdown || {};
+  const subCats = sn.expense.subcategoryBreakdown || {};
   const total = Object.values(cats).reduce((a, b) => a + b, 0);
   const diagnoses = [];
 
+  // 1. 找出占比最高的二级分类（它在哪个一级分类下贡献最大）
+  const topSubs = [];
+  for (const [cat, subs] of Object.entries(subCats)) {
+    for (const [sub, amt] of Object.entries(subs)) {
+      topSubs.push({ cat, sub, amt, pct: amt / total * 100 });
+    }
+  }
+  topSubs.sort((a, b) => b.amt - a.amt);
+  const top3Subs = topSubs.slice(0, 3);
+  if (top3Subs.length > 0) {
+    diagnoses.push('🔍 <strong>支出前三小类：</strong>' +
+      top3Subs.map(s => esc(s.sub) + ' ' + money(s.amt) + '（' + numFmt.format(s.pct) + '%）').join(' · '));
+  }
+
+  // 2. 对占比超过30%的一级分类做二级拆解
   for (const [cat, amt] of Object.entries(cats)) {
     const pct = amt / total * 100;
-    if (cat === "其他" && pct > 15) {
-      diagnoses.push('⚠️ <strong>"其他"支出占 ' + numFmt.format(pct) + '%（' + money(amt) + '）</strong>——很多消费没被正确分类。在钱迹里把"其他"条目改为具体分类后重新导出上传即可。');
-    } else if (pct > 50) {
-      diagnoses.push('📊 <strong>' + esc(cat) + '</strong> 占总支出 ' + numFmt.format(pct) + '%——不是搬家/装修等特殊月份的话值得关注。');
+    if (pct > 30) {
+      const subs = subCats[cat] || {};
+      const subEntries = Object.entries(subs).sort((a, b) => b[1] - a[1]).slice(0, 3);
+      if (subEntries.length > 0) {
+        const subDetails = subEntries.map(([s, v]) => esc(s) + ' ' + money(v)).join(' · ');
+        diagnoses.push('📊 <strong>' + esc(cat) + '</strong> 占 ' + numFmt.format(pct) + '%——主要花在：' + subDetails);
+      } else {
+        diagnoses.push('📊 <strong>' + esc(cat) + '</strong> 占 ' + numFmt.format(pct) + '%——暂无二级分类明细，建议在钱迹里细化分类');
+      }
     }
   }
 
-  // 同比上月
+  // 3. 同比上月
   const [y, m] = sn.month.split("-").map(Number);
   const prevM = m - 1 > 0 ? m - 1 : 12;
   const prevY = m - 1 > 0 ? y : y - 1;
@@ -371,6 +392,7 @@ function renderAIDiagnosis(sn, hourlyRate) {
     const dir = delta >= 0 ? "增加" : "减少";
     diagnoses.push('📈 相比上月（' + monthLabel(prevMonth) + '）：支出' + dir + '了 ' + money(Math.abs(delta)) + '（' + numFmt.format(Math.abs(deltaPct)) + '%）');
 
+    // 变化>5%的分类
     const allCats = new Set([...Object.keys(cats), ...Object.keys(prevSn.expense.categoryBreakdown || {})]);
     for (const cat of allCats) {
       const cur = cats[cat] || 0;
@@ -382,7 +404,7 @@ function renderAIDiagnosis(sn, hourlyRate) {
     }
   }
 
-  // 同比去年
+  // 4. 同比去年同月
   const lyMonth = (y - 1) + "-" + String(m).padStart(2, "0");
   const lySn = state.snapshots.find(s => s.month === lyMonth);
   if (lySn && lySn.expense.confirmedTotal > 0) {
@@ -392,12 +414,13 @@ function renderAIDiagnosis(sn, hourlyRate) {
     diagnoses.push('🗓 相比去年同月（' + monthLabel(lyMonth) + '）：支出' + (delta >= 0 ? '增加' : '减少') + '了 ' + money(Math.abs(delta)) + '（' + numFmt.format(Math.abs(deltaPct)) + '%）');
   }
 
+  // 5. 生命时间
   if (hourlyRate > 0) {
     const lifeHr = total / hourlyRate;
     diagnoses.push('⏳ 本月支出换走约 <strong>' + numFmt.format(lifeHr) + ' 小时</strong>生命时间（≈' + numFmt.format(lifeHr / 8) + ' 个工作日）');
   }
 
-  if (diagnoses.length === 0) diagnoses.push("✅ 支出结构正常，没有明显异常。继续加油！");
+  if (diagnoses.length === 0) diagnoses.push("✅ 暂无足够数据进行分析。至少需要一个月的数据。");
 
   el.innerHTML = diagnoses.map(d => '<div class="advice-item"><span class="advice-number">💡</span><p style="font-size:0.76rem;line-height:1.55;">' + d + '</p></div>').join("");
 }
