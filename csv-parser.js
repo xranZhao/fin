@@ -63,11 +63,21 @@ function parseAmount(value) {
 }
 
 function extractMonth(value) {
-  const match = String(value || "").match(/(20\d{2})[-/.年](\d{1,2})/);
-  if (!match) return "";
-  const month = Number(match[2]);
-  if (month < 1 || month > 12) return "";
-  return `${match[1]}-${String(month).padStart(2, "0")}`;
+  const s = String(value || "").trim();
+  // 钱迹格式: "2026/7/5 17:16" 或 "2026-07-05 17:16"
+  const match = s.match(/(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})?/);
+  if (match) {
+    const year = match[1];
+    const month = Number(match[2]);
+    if (month >= 1 && month <= 12) return `${year}-${String(month).padStart(2, "0")}`;
+  }
+  // 回退：只有年月的格式
+  const shortMatch = s.match(/(20\d{2})[-/.](\d{1,2})\b/);
+  if (shortMatch) {
+    const m = Number(shortMatch[2]);
+    if (m >= 1 && m <= 12) return `${shortMatch[1]}-${String(m).padStart(2, "0")}`;
+  }
+  return "";
 }
 
 function shouldExclude(value, header) {

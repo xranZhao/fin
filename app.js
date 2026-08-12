@@ -413,9 +413,29 @@ function genAdvice(report, budget) {
   return adv.slice(0, 3);
 }
 
-// ================================================================
-// 2. 月度记录
-// ================================================================
+// 累进转入计算（协议第2.2条）
+function calcTransferRule(income) {
+  const i = Number(income) || 0;
+  if (i <= 10000) return { transfer: Math.round(i * 0.8 * 100) / 100, rate: 80 };
+  if (i <= 20000) return { transfer: Math.round((8000 + (i - 10000) * 0.9) * 100) / 100, rate: 90 };
+  if (i <= 30000) return { transfer: Math.round((17000 + (i - 20000) * 0.95) * 100) / 100, rate: 95 };
+  return { transfer: Math.round((26500 + (i - 30000) * 0.98) * 100) / 100, rate: 98 };
+}
+
+function autoFillTransfers() {
+  const suliIncome = safeNum(byId("suliIncome")?.value);
+  const chenqianIncome = safeNum(byId("chenqianIncome")?.value);
+  if (suliIncome > 0) {
+    const r = calcTransferRule(suliIncome);
+    byId("suliTransfer").value = r.transfer;
+    byId("suliKept").value = Math.round((suliIncome - r.transfer) * 100) / 100;
+  }
+  if (chenqianIncome > 0) {
+    const r = calcTransferRule(chenqianIncome);
+    byId("chenqianTransfer").value = r.transfer;
+    byId("chenqianKept").value = Math.round((chenqianIncome - r.transfer) * 100) / 100;
+  }
+}
 function renderEntry() {
   byId("entryMonth").value = selectedMonth;
   byId("csvUploadResult").hidden = true;
@@ -433,6 +453,12 @@ function renderEntry() {
     byId("confirmedExpense").value = snap.expense.confirmedTotal || "";
     byId("monthlyNote").value = snap.note || "";
     if (snap.expense.autoTotal && snap.expense.sourceFileName) showCsvResult(snap);
+    if (snap.expense.rawCsvBase64) {
+      // 已有存档CSV
+      byId("csvUploadResult").hidden = false;
+      byId("csvUploadResult").className = "upload-result";
+      byId("csvUploadResult").innerHTML = `已存档原始CSV：${snap.expense.sourceFileName || "未知文件"}<br><small style="color:var(--ink-faint)">点击上传可覆盖</small>`;
+    }
     setText("headerMonthLabel", "编辑已有记录");
   } else {
     ["spendingBalance","savingsBalanceEntry","suliIncome","suliTransfer","suliKept","chenqianIncome","chenqianTransfer","chenqianKept","confirmedExpense","monthlyNote"].forEach(id => {
@@ -449,26 +475,39 @@ function showCsvResult(snap) {
   el.className = "upload-result";
   const cats = snap.expense.categoryBreakdown || {};
   const top3 = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${money(v)}`).join(" · ");
-  el.innerHTML = `已解析 ${snap.expense.sourceFileName || ""}<br>${snap.expense.recordCount} 笔 · 合计 ${money(snap.expense.confirmedTotal)}<br>${top3 || "无分类数据"}`;
+  el.innerHTML = `已解析 ${snap.expense.sourceFileName || ""}<br>${snap.expense.recordCount} 笔 · 合计 ${money(snap.expense.confirmedTotal)}<br>${top3 || "无分类数据"}${snap.expense.rawCsvBase64 ? '<br><small style="color:var(--ink-faint)">原始CSV已存档</small>' : ''}`;
   byId("confirmedExpense").value = snap.expense.confirmedTotal;
 }
 
 async function handleCsvUpload(file) {
+  // 立即反馈
+  const el = byId("csvUploadResult");
+  el.hidden = false;
+  el.className = "upload-result";
+  el.innerHTML = `<em>正在解析 ${file.name}…</em>`;
+
   try {
     const summary = await summarizeQianjiFile(file, selectedMonth);
     uploadedSummary = summary;
+
+    // 保存原始CSV base64
+    const rawBuffer = await file.arrayBuffer();
+    const rawBase64 = btoa(String.fromCharCode(...new Uint8Array(rawBuffer)));
+    uploadedSummary.rawCsvBase64 = rawBase64;
+    uploadedSummary.rawCsvFileName = file.name;
+
     const cats = summary.categoryBreakdown || {};
+    const total = Object.values(cats).reduce((a, b) => a + b, 0) || 0;
     const top3 = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${money(v)}`).join(" · ");
-    const el = byId("csvUploadResult");
-    el.hidden = false;
+    const pctStr = summary.skippedRows > 0 ? `（跳过 ${summary.skippedRows} 条收入/退款/其他月份）` : "";
+
     el.className = "upload-result";
-    el.innerHTML = `${file.name}<br>${summary.matchedRows} 笔 · 合计 ${money(summary.total)}<br>${top3 || "无分类数据"}`;
+    el.innerHTML = `✅ ${file.name}<br>${summary.matchedRows} 笔有效支出 · 合计 <strong>${money(summary.total)}</strong><br>${top3 || "无分类数据"}${pctStr ? '<br>' + pctStr : ''}`;
     byId("confirmedExpense").value = summary.total;
+    showToast(`CSV解析完成：${summary.matchedRows} 笔 · ${money(summary.total)}`);
   } catch (err) {
-    const el = byId("csvUploadResult");
-    el.hidden = false;
     el.className = "upload-result error";
-    el.textContent = err.message;
+    el.innerHTML = `❌ ${file.name}<br>${err.message}<br><small>请确认文件是钱迹导出的有效CSV，且包含目标月份的支出记录。</small>`;
     uploadedSummary = null;
   }
 }
@@ -498,6 +537,8 @@ async function saveSnapshot(e) {
       sourceFileName: uploadedSummary?.sourceFileName || (existing?.expense?.sourceFileName || ""),
       sourceMonths: uploadedSummary?.sourceMonths || (existing?.expense?.sourceMonths || []),
       importedAt: uploadedSummary?.importedAt || (existing?.expense?.importedAt || ""),
+      rawCsvBase64: uploadedSummary?.rawCsvBase64 || (existing?.expense?.rawCsvBase64 || ""),
+      rawCsvFileName: uploadedSummary?.rawCsvFileName || (existing?.expense?.rawCsvFileName || ""),
     },
     note: (byId("monthlyNote").value || "").trim().slice(0, 200),
   };
@@ -929,7 +970,17 @@ async function init() {
   byId("entryMonth").addEventListener("change", (e) => { selectedMonth = e.target.value; renderEntry(); });
   byId("monthlyForm").addEventListener("submit", saveSnapshot);
   byId("deleteSnapshotButton").addEventListener("click", deleteSnapshot);
-  byId("csvFile").addEventListener("change", (e) => { if (e.target.files[0]) handleCsvUpload(e.target.files[0]); });
+  // CSV上传事件，同时读raw base64
+  byId("csvFile").addEventListener("change", (e) => {
+    if (!e.target.files[0]) return;
+    handleCsvUpload(e.target.files[0]);
+    // 重置input，允许重复上传同一文件
+    e.target.value = "";
+  });
+
+  // 工资自动计算：输入工资后自动填转入和个人留存
+  byId("suliIncome").addEventListener("input", autoFillTransfers);
+  byId("chenqianIncome").addEventListener("input", autoFillTransfers);
 
   // 生命能量交互
   byId("lifeTradeoffAmount")?.addEventListener("input", renderLife);

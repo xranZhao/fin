@@ -37,7 +37,7 @@ const pageResponse = await handler(Buffer.from(JSON.stringify({
 
 assert.equal(pageResponse.statusCode, 200);
 assert.equal(pageResponse.headers["Content-Disposition"], "inline");
-assert.match(pageResponse.body, /家庭月度驾驶舱/);
+assert.match(pageResponse.body, /家里有前耶/);
 assert.equal(pageResponse.isBase64Encoded, undefined);
 
 const missing = await handler(JSON.stringify({
