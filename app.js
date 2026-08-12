@@ -1109,8 +1109,7 @@ function saveSettingsFromPage() {
   applyTheme();
   applyRole();
   showToast("设置已保存");
-  // 异步同步云端，失败不阻塞
-  setTimeout(function() { syncCloudState().catch(function() {}); }, 100);
+  // 异步同步云端，失败仅 toast 提醒
   setTimeout(function() { syncCloudState().catch(function() {}); }, 100);
 }
 
