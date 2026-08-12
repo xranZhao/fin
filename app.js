@@ -32,6 +32,8 @@ let cloudMode = false;
 let cloudAdapter = null;
 let cloudSession = null;
 let skipNextSettingsSave = false;
+let syncDirty = false;          // 本地有未同步的修改
+let syncStatusTimer = null;     // 定时检查云端连通性
 const cloudApiBase = String(window.FAMILY_FINANCE_API_BASE || "").replace(/\/$/, "");
 const cloudTokenKey = "family-finance-cloud-session";
 
@@ -47,10 +49,26 @@ function monthLabel(m) { const [y, mn] = String(m).split("-"); return y && mn ? 
 function sortedSnapshots() { return [...state.snapshots].sort((a, b) => a.month.localeCompare(b.month)); }
 function setText(id, v) { const el = byId(id); if (el) el.textContent = v; }
 
-function showToast(msg) {
+function showToast(msg, type) {
   const t = byId("toast"); clearTimeout(toastTimer);
   t.textContent = msg; t.hidden = false;
-  toastTimer = setTimeout(() => { t.hidden = true; }, 2800);
+  t.className = "toast" + (type ? " " + type : "");
+  toastTimer = setTimeout(() => { t.hidden = true; }, 3200);
+}
+
+// 同步状态指示器：synced | pending | offline | local
+function updateSyncStatus(status) {
+  const el = byId("syncStatus");
+  if (!el) return;
+  const map = {
+    synced:  ["🟢 已同步", "synced"],
+    pending: ["🟡 未同步", "pending"],
+    offline: ["🔴 离线",   "offline"],
+    local:   ["⚪ 仅本地", "local"],
+  };
+  const entry = map[status] || map.local;
+  el.textContent = entry[0];
+  el.className = "sync-status " + entry[1];
 }
 
 function applyTheme() {
@@ -67,14 +85,17 @@ function applyRole() {
   if (logoutButton) logoutButton.hidden = !cloudMode;
 }
 
-async function syncCloudState() {
+async function syncCloudState(retriesLeft) {
   if (!cloudMode || !cloudAdapter) return;
+  const maxRetries = retriesLeft !== undefined ? retriesLeft : 3;
   try {
     state = await cloudAdapter.save(state);
-    showToast("已同步到家庭云端");
+    showToast("已同步到家庭云端", "success");
+    syncDirty = false;
+    updateSyncStatus("synced");
   } catch (error) {
     if (error.status === 409) {
-      showToast("云端已被更新，正在自动合并…");
+      showToast("云端已被更新，正在自动合并…", "warning");
       try {
         // 全量合并：拉取最新 → 本地月份覆盖云端同月 → 追加新月份
         const fresh = await cloudAdapter.load();
@@ -84,15 +105,32 @@ async function syncCloudState() {
         }
         fresh.snapshots = [...mergedMap.values()].sort((a, b) => a.month.localeCompare(b.month));
         state = await cloudAdapter.save(fresh);
-        showToast("已自动合并并同步到云端");
+        showToast("已自动合并并同步到云端", "success");
+        syncDirty = false;
+        updateSyncStatus("synced");
       } catch (retryErr) {
-        showToast("合并失败，请稍后重新保存");
+        showToast("合并失败，请稍后重新保存", "error");
+        syncDirty = true;
+        updateSyncStatus("pending");
         throw retryErr;
       }
+    } else if (maxRetries > 0 && (error.message === "Failed to fetch" || error.message === "NetworkError" || (error.status && error.status >= 500))) {
+      // 网络错误或服务端错误：指数退避重试
+      const delay = Math.pow(2, 4 - maxRetries) * 1000; // 1s → 2s → 4s
+      showToast("云端同步失败，" + (delay / 1000) + "秒后重试（" + maxRetries + "次剩余）", "syncing");
+      await new Promise(r => setTimeout(r, delay));
+      try {
+        await syncCloudState(maxRetries - 1);
+      } catch {
+        syncDirty = true;
+        updateSyncStatus("pending");
+        showToast("本机已保存，云端同步失败：请检查网络后重试", "error");
+      }
     } else {
-      showToast("本机已保存，云端同步失败：" + (error.message || "网络异常"));
+      syncDirty = true;
+      updateSyncStatus("pending");
+      showToast("本机已保存，云端同步失败：" + (error.message || "网络异常"), "error");
     }
-    throw error;
   }
 }
 
@@ -111,31 +149,62 @@ function openCloudLogin(message = "") {
 
 async function loadCloudStateAfterLogin() {
   try {
-    state = await cloudAdapter.load();
-    saveSettings(state, state.settings);
+    const cloudState = await cloudAdapter.load();
+    // 合并策略：云端有数据 + 本地有数据 → 按月份合并（本地优先）
+    if (state.snapshots.length > 0) {
+      const mergedMap = new Map(cloudState.snapshots.map(s => [s.month, s]));
+      for (const localSnap of state.snapshots) {
+        mergedMap.set(localSnap.month, localSnap);
+      }
+      cloudState.snapshots = [...mergedMap.values()].sort((a, b) => a.month.localeCompare(b.month));
+      state = cloudState;
+      saveSettings(state, state.settings);
+      showToast("本地与云端已合并（月份重复时本地优先）", "warning");
+    } else {
+      // 本地无数据 → 直接用云端数据
+      state = cloudState;
+      saveSettings(state, state.settings);
+      updateSyncStatus("synced");
+    }
   } catch (error) {
     if (error.status !== 404) throw error;
-    if (cloudSession.role !== "manager") {
-      throw new Error("家庭云端账本尚未初始化，请由管理者先登录并上传第一份数据");
+    // 云端空 + 本地有数据 → 上传本地到云端（而非覆盖本地）
+    if (state.snapshots.length > 0) {
+      state = await cloudAdapter.save(state);
+      saveSettings(state, state.settings);
+      showToast("已将本地数据上传为家庭第一份云端账本", "success");
+      updateSyncStatus("synced");
+    } else {
+      if (cloudSession.role !== "manager") {
+        throw new Error("家庭云端账本尚未初始化，请由管理者先登录并上传第一份数据");
+      }
+      // 本地也无数据，保持默认空状态（云端已经 404，无需额外操作）
+      showToast("云端尚未初始化，录入数据后会自动上传", "warning");
+      syncDirty = false;
+      updateSyncStatus("synced");
     }
-    const shouldSeed = confirm("云端还是空的。是否把这台设备当前的本地账本上传为家庭第一份云端数据？");
-    if (!shouldSeed) throw new Error("云端尚未初始化");
-    state = await cloudAdapter.save(state);
+    return; // 不要继续往下抛异常，404 已经处理好了
   }
   setCloudRole(cloudSession.role);
   selectedMonth = sortedSnapshots().at(-1)?.month || currentMonth;
+  syncDirty = false;
 }
 
 async function setupCloudMode() {
-  if (!cloudApiBase || ["127.0.0.1", "localhost"].includes(location.hostname)) return;
+  if (!cloudApiBase || ["127.0.0.1", "localhost"].includes(location.hostname)) {
+    updateSyncStatus("local");
+    return;
+  }
   try {
     const health = await fetch(cloudUrl("/api/health"));
-    if (!health.ok) return;
+    if (!health.ok) { updateSyncStatus("local"); return; }
   } catch {
+    updateSyncStatus("offline");
+    showToast("云端服务不可达，仅本地模式运行", "warning");
     return;
   }
   const token = readCloudToken();
-  if (!token) { openCloudLogin(); return; }
+  if (!token) { updateSyncStatus("local"); openCloudLogin(); return; }
   cloudAdapter = new RemoteStateAdapter(cloudApiBase, token);
   const sessionResponse = await fetch(cloudUrl("/api/session"), { headers: { Authorization: `Bearer ${token}` } });
   if (sessionResponse.ok) {
@@ -144,12 +213,14 @@ async function setupCloudMode() {
     try {
       await loadCloudStateAfterLogin();
     } catch (error) {
+      updateSyncStatus("local");
       openCloudLogin(error.message);
     }
   } else {
     clearCloudToken();
     cloudAdapter = null;
     cloudMode = false;
+    updateSyncStatus("local");
     openCloudLogin();
   }
 }
@@ -636,7 +707,7 @@ async function handleCsvUpload(file) {
     el.className = "upload-result";
     el.innerHTML = `✅ ${file.name}<br>${summary.matchedRows} 笔有效支出 · 合计 <strong>${money(summary.total)}</strong><br>${top3 || "无分类数据"}${pctStr ? '<br>' + pctStr : ''}`;
     byId("confirmedExpense").value = summary.total;
-    showToast(`CSV解析完成：${summary.matchedRows} 笔 · ${money(summary.total)}`);
+    showToast(`CSV解析完成：${summary.matchedRows} 笔 · ${money(summary.total)}`, "success");
   } catch (err) {
     el.className = "upload-result error";
     el.innerHTML = `❌ ${file.name}<br>${err.message}<br><small>请确认文件是钱迹导出的有效CSV，且包含目标月份的支出记录。</small>`;
@@ -647,7 +718,7 @@ async function handleCsvUpload(file) {
 async function saveSnapshot(e) {
   e.preventDefault();
   const month = byId("entryMonth").value;
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) { showToast("月份格式不正确"); return; }
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) { showToast("月份格式不正确", "error"); return; }
   const existing = state.snapshots.find(s => s.month === month);
   if (existing && !confirm(`${monthLabel(month)} 已有记录，覆盖吗？`)) return;
 
@@ -680,19 +751,21 @@ async function saveSnapshot(e) {
   };
 
   state = upsertSnapshot(state, snap);
+  syncDirty = true;
   try { await syncCloudState(); } catch { /* syncCloudState 已 toast */ }
-  showToast(`${monthLabel(month)} 已保存`);
+  showToast(`${monthLabel(month)} 已保存`, "success");
   navigateTo("overview");
 }
 
 async function deleteSnapshot() {
   const month = byId("entryMonth").value;
-  if (!state.snapshots.find(s => s.month === month)) { showToast("该月份没有记录"); return; }
+  if (!state.snapshots.find(s => s.month === month)) { showToast("该月份没有记录", "warning"); return; }
   if (!confirm(`确定删除 ${monthLabel(month)} 记录？`)) return;
   state = { ...state, snapshots: state.snapshots.filter(s => s.month !== month), metadata: { ...state.metadata, updatedAt: new Date().toISOString() } };
   state = saveSettings(state, state.settings);
+  syncDirty = true;
   try { await syncCloudState(); } catch { return; }
-  showToast(`${monthLabel(month)} 已删除`);
+  showToast(`${monthLabel(month)} 已删除`, "success");
   renderEntry();
 }
 
@@ -1072,16 +1145,16 @@ function renderSettingsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = '家里有前备份_' + new Date().toISOString().slice(0, 10) + '.json'; a.click();
     URL.revokeObjectURL(url);
-    showToast("备份已下载");
+    showToast("备份已下载", "success");
   };
   byId("importBackupFile").onchange = async (e) => {
     try {
       const text = await e.target.files[0].text();
       state = importState(text);
       await syncCloudState();
-      showToast("备份已恢复");
+      showToast("备份已恢复", "success");
       setTimeout(() => location.reload(), 500);
-    } catch (err) { showToast(err.message); }
+    } catch (err) { showToast(err.message, "error"); }
   };
   byId("clearDataBtn").onclick = async () => {
     if (!confirm("确定清空全部数据？此操作不可恢复。")) return;
@@ -1108,8 +1181,9 @@ function saveSettingsFromPage() {
   state = saveSettings(state, ns);
   applyTheme();
   applyRole();
-  showToast("设置已保存");
+  showToast("设置已保存", "success");
   // 异步同步云端，失败仅 toast 提醒
+  syncDirty = true;
   setTimeout(function() { syncCloudState().catch(function() {}); }, 100);
 }
 
@@ -1202,7 +1276,7 @@ function toggleRole() {
     return;
   }
   // 本地模式不再支持对话框内切换角色
-  showToast("云端模式下登录时选择身份即可切换");
+  showToast("云端模式下登录时选择身份即可切换", "warning");
 }
 
 async function logoutCloud() {
@@ -1278,7 +1352,7 @@ async function init() {
       await loadCloudStateAfterLogin();
       byId("cloudLoginDialog").close();
       renderOverview();
-      showToast(cloudSession.role === "manager" ? "已进入管理云端" : "已进入只读云端");
+      showToast(cloudSession.role === "manager" ? "已进入管理云端" : "已进入只读云端", "success");
     } catch (error) {
       setText("cloudLoginHint", error.message || "登录失败，请重试");
     } finally {
@@ -1318,6 +1392,38 @@ async function init() {
 
   // PWA
   window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferredInstallPrompt = e; });
+
+  // 网络状态监听：断网/恢复时更新同步状态指示器
+  window.addEventListener("online", () => {
+    if (cloudMode) {
+      updateSyncStatus(syncDirty ? "pending" : "synced");
+      showToast("网络已恢复", "success");
+      if (syncDirty) syncCloudState().catch(function() {});
+    } else {
+      updateSyncStatus("local");
+    }
+  });
+  window.addEventListener("offline", () => {
+    if (cloudMode) updateSyncStatus("offline");
+  });
+
+  // 定时检查云端连通性（每 5 分钟，仅在云端模式下）
+  if (cloudMode) {
+    syncStatusTimer = setInterval(async () => {
+      try {
+        const resp = await fetch(cloudUrl("/api/health"));
+        if (resp.ok) {
+          updateSyncStatus(syncDirty ? "pending" : "synced");
+          // 如果有未同步数据，自动尝试同步
+          if (syncDirty) syncCloudState().catch(function() {});
+        } else {
+          updateSyncStatus("offline");
+        }
+      } catch {
+        updateSyncStatus("offline");
+      }
+    }, 300000);
+  }
 
   // 享福：添加行程行
   const addTravelBtn = byId("addTravelLegBtn");

@@ -1084,7 +1084,29 @@ textarea { resize: vertical; line-height: 1.5; }
   border-radius: 10px;
   box-shadow: var(--shadow-lg);
   font-size: 0.76rem;
+  transition: background 0.25s, color 0.25s;
 }
+.toast.success { background: #1b4d2e; color: #e8f5e0; }
+.toast.warning { background: #5c4710; color: #fef3c7; }
+.toast.error   { background: #5c1a1a; color: #fee2e2; }
+.toast.syncing { background: #1a3a5c; color: #dbeafe; }
+
+/* ---- 同步状态指示器 ---- */
+.sync-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.25s, color 0.25s;
+}
+.sync-status.synced  { background: #e0f2e4; color: #15523c; }
+.sync-status.pending { background: #fef3c7; color: #6b4c00; }
+.sync-status.offline { background: #fee2e2; color: #881111; }
+.sync-status.local   { background: #e9e5dc; color: #5c5548; }
 
 /* ---- 权限模式 ---- */
 .viewer-only { display: none; }
