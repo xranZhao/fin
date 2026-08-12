@@ -300,10 +300,9 @@ async function handleApi(request) {
     if (!current && clientEtag) return json(409, { error: "云端数据状态已变化，请重新加载" });
     if (containsSensitive(state)) throw new Error("数据包含敏感信息或禁用字段");
 
-  // 保存 state 前清理 rawCsvBase64（已另外存档到 OSS）
+  // 清理过期字段
   for (const snapshot of state.snapshots) {
-    delete snapshot.expense?.rawCsvBase64;
-    delete snapshot.expense?.rawCsvFileName;
+    delete snapshot.expense?.blobCsv;
   }
 
   const body = JSON.stringify(state);
