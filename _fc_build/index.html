@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#15523c">
-  <meta name="description" content="家庭月度财务驾驶舱，记录大数、预算、储蓄趋势和生命时间。">
-  <title>家庭月度驾驶舱</title>
+  <meta name="description" content="家里有前耶！陈前 & 赵欣然的家庭财务驾驶舱。">
+  <title>家里有前耶！</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
@@ -18,7 +18,7 @@
       <div class="brand-lockup">
         <span class="brand-mark" aria-hidden="true">家</span>
         <div>
-          <p class="brand-title">家庭月度驾驶舱</p>
+          <p class="brand-title">家里有前耶！</p>
           <p class="brand-subtitle" id="headerMonthLabel">尚未开始记录</p>
         </div>
       </div>
@@ -36,7 +36,7 @@
         <div class="page-heading">
           <div>
             <p class="kicker" id="overviewKicker">这个月，钱去了哪里</p>
-            <h1>家庭经济状况</h1>
+            <h1>家庭概览</h1>
           </div>
           <label class="month-picker compact-field">
             <span>查看周期</span>
@@ -79,7 +79,7 @@
           <section class="card budget-section">
             <div class="section-title-row">
               <div><h2>家庭花销预算</h2><p id="budgetSummary">本月预算 ¥3,000</p></div>
-              <strong id="budgetUsage" class="amount">0%</strong>
+              <div style="text-align:right;"><strong id="budgetUsage" class="amount">0%</strong><p id="budgetActual" style="font-size:0.65rem;color:var(--ink-soft);margin:0;">实际 ¥0</p></div>
             </div>
             <div class="budget-line"><span id="budgetLineFill"></span></div>
             <div class="budget-foot">
@@ -92,7 +92,7 @@
           <section class="card card-spacious">
             <h2>本月分配</h2>
             <table class="dual-matrix" id="overviewDualMatrix" aria-label="双人本月分配">
-              <thead><tr><th></th><th>酥梨</th><th>陈前</th></tr></thead>
+              <thead><tr><th></th><th>欣然</th><th>陈前</th></tr></thead>
               <tbody>
                 <tr><th>到账工资</th><td id="ovSuliIncome">¥0</td><td id="ovChenqianIncome">¥0</td></tr>
                 <tr><th>转入家庭</th><td id="ovSuliTransfer">¥0</td><td id="ovChenqianTransfer">¥0</td></tr>
@@ -174,7 +174,7 @@
           <fieldset class="form-section">
             <legend>本月收入分配</legend>
             <div class="person-dual-header">
-              <span></span><span>酥梨</span><span>陈前</span>
+              <span></span><span>欣然</span><span>陈前</span>
             </div>
             <div class="person-dual-input">
               <span class="input-label">到账工资</span>
@@ -217,6 +217,21 @@
             <textarea id="monthlyNote" rows="2" maxlength="200" placeholder="200 字以内的异常说明或大事备忘"></textarea>
           </fieldset>
 
+          <!-- 享福标记 -->
+          <fieldset class="form-section manager-only">
+            <legend>享福 · 旅游标记</legend>
+            <p style="color:var(--ink-soft);font-size:0.7rem;margin-bottom:0.5rem;">一个月去了好几个地方？可以添加多段行程。</p>
+            <div id="travelLegsContainer">
+              <div class="travel-leg" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.4rem;align-items:end;margin-bottom:0.4rem;">
+                <div class="field"><span>开始日期</span><input type="date" class="travel-start" aria-label="旅游开始日期"></div>
+                <div class="field"><span>结束日期</span><input type="date" class="travel-end" aria-label="旅游结束日期"></div>
+                <div class="field"><span>目的地</span><input type="text" class="travel-dest" maxlength="60" placeholder="莫干山"></div>
+                <button type="button" class="icon-button remove-travel-btn" style="align-self:flex-end;margin-bottom:0.15rem;" title="删除此行">✕</button>
+              </div>
+            </div>
+            <button type="button" class="secondary-button" id="addTravelLegBtn" style="margin-top:0.4rem;font-size:0.72rem;">+ 添加一段行程</button>
+          </fieldset>
+
           <div class="form-actions manager-only">
             <button type="button" class="danger-button" id="deleteSnapshotButton">删除本月</button>
             <button type="submit" class="primary-button" id="saveSnapshotButton">保存本月记录</button>
@@ -254,7 +269,7 @@
           <section class="card card-spacious">
             <h2>实际时薪对比</h2>
             <table class="dual-matrix" aria-label="双人实际时薪对比">
-              <thead><tr><th></th><th>酥梨</th><th>陈前</th></tr></thead>
+              <thead><tr><th></th><th>欣然</th><th>陈前</th></tr></thead>
               <tbody>
                 <tr><th>参考月薪</th><td id="lifeSuliRefIncome">—</td><td id="lifeChenqianRefIncome">—</td></tr>
                 <tr><th>实际时薪</th><td id="lifeSuliHourly">—</td><td id="lifeChenqianHourly">—</td></tr>
@@ -295,6 +310,7 @@
       <section class="page" id="analysisPage" data-page="analysis">
         <div class="page-heading">
           <div>
+            <button class="text-button back-button" data-back="overview">← 回到概览</button>
             <p class="kicker">这个月，钱去了哪里</p>
             <h1>支出分析</h1>
           </div>
@@ -324,6 +340,18 @@
             <div class="category-list" id="analysisCategoryList"></div>
           </section>
 
+          <!-- 二级分类明细 -->
+          <section class="card card-spacious" id="analysisSubcategorySection">
+            <h2>各分类具体花在哪</h2>
+            <div id="analysisSubcategoryList"></div>
+          </section>
+
+          <!-- AI 诊断 -->
+          <section class="card card-spacious" id="analysisAISection">
+            <h2>智能诊断</h2>
+            <div id="analysisAIDiagnosis"></div>
+          </section>
+
           <!-- 关键花费 -->
           <section class="card" id="analysisKeyItems" hidden>
             <h2>值得关注</h2>
@@ -346,6 +374,7 @@
       <section class="page" id="summaryPage" data-page="summary">
         <div class="page-heading">
           <div>
+            <button class="text-button back-button" data-back="overview">← 回到概览</button>
             <p class="kicker">月度、半年和年度复盘</p>
             <h1>家庭财务总结</h1>
           </div>
@@ -395,7 +424,7 @@
           <section class="card card-spacious">
             <h2>双人累计贡献</h2>
             <table class="dual-matrix" id="summaryDualMatrix" aria-label="双人累计贡献">
-              <thead><tr><th></th><th>酥梨</th><th>陈前</th></tr></thead>
+              <thead><tr><th></th><th>欣然</th><th>陈前</th></tr></thead>
               <tbody>
                 <tr><th>累计收入</th><td id="sumSuliIncome">¥0</td><td id="sumChenqianIncome">¥0</td></tr>
                 <tr><th>累计转入</th><td id="sumSuliTransfer">¥0</td><td id="sumChenqianTransfer">¥0</td></tr>
@@ -425,13 +454,84 @@
         </div>
       </section>
 
+      <!-- ====== 6. 享福 ====== -->
+      <section class="page" id="enjoyPage" data-page="enjoy">
+        <div class="page-heading">
+          <div>
+            <p class="kicker">赚了钱也要好好享受生活</p>
+            <h1>享福</h1>
+          </div>
+          <label class="month-picker compact-field">
+            <span>查看月份</span>
+            <select id="enjoyMonthSelect" aria-label="选择查看月份"></select>
+          </label>
+        </div>
+
+        <div class="empty-state" id="enjoyEmpty">
+          <p class="empty-title">这个月还没标记旅游</p>
+          <p>在月度记录里标记旅游日期，这里就能看到花了多少钱、换了多少时间、值不值得。</p>
+        </div>
+
+        <div id="enjoyContent" hidden>
+          <!-- 旅游概览 -->
+          <section class="card card-spacious" style="text-align:center;">
+            <span class="life-hero-label" id="enjoyDest">—</span>
+            <span class="life-hero-number" id="enjoyTotal">¥0</span>
+            <span class="life-hero-label">天 · 日均 <strong id="enjoyAvg">¥0</strong></span>
+          </section>
+
+          <!-- 分类拆解 -->
+          <section class="card card-spacious">
+            <h2>旅游花了什么</h2>
+            <div class="category-list" id="enjoyCategoryList"></div>
+          </section>
+
+          <!-- 二级分类明细 -->
+          <section class="card card-spacious" id="enjoyDetailSection">
+            <h2>具体花在哪</h2>
+            <div id="enjoyDetailList"></div>
+          </section>
+
+          <!-- 生命交换 -->
+          <section class="card card-spacious">
+            <h2>这几天换走了多少时间</h2>
+            <div style="text-align:center;">
+              <p style="font-family:var(--font-title);font-size:1.6rem;margin:0.3rem 0;" id="enjoyLifeHours">—</p>
+              <p style="color:var(--ink-soft);font-size:0.74rem;">小时（约 <strong id="enjoyLifeDays">—</strong> 个工作日）</p>
+              <p style="color:var(--ink-soft);font-size:0.74rem;">放弃的工资：<strong id="enjoyLostWage">¥0</strong></p>
+            </div>
+            <div class="life-summary" id="enjoyVerdict"></div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ====== 7. 设置 ====== -->
+      <section class="page" id="settingsPage" data-page="settings" style="padding-bottom:2rem;">
+        <div class="page-heading">
+          <div>
+            <p class="kicker">每月录入前维护一次，后面自动计算</p>
+            <h1>家庭设置</h1>
+          </div>
+        </div>
+        <div id="settingsPageBody"></div>
+        <div class="stacked-actions" style="margin-top:1rem;">
+          <button class="primary-button manager-only" type="button" id="saveSettingsBtn">保存设置</button>
+        </div>
+        <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--line);">
+          <p style="color:var(--ink-soft);font-size:0.74rem;">只读模式下不能修改设置。</p>
+          <p style="color:var(--ink-faint);font-size:0.68rem;">云端账本数据自动同步，不需要在这里备份恢复。</p>
+        </div>
+      </section>
+
     </main>
 
     <!-- 底部导航 -->
     <nav class="bottom-nav" aria-label="主导航">
-      <button class="nav-button active" data-page="overview" aria-current="page">总览</button>
-      <button class="nav-button" data-page="entry">月度记录</button>
-      <button class="nav-button" data-page="life">生命能量</button>
+      <button class="nav-button active" data-page="overview" aria-current="page">🏠 概览</button>
+      <button class="nav-button" data-page="entry">📝 记录</button>
+      <button class="nav-button" data-page="life">⏳ 生命</button>
+      <button class="nav-button" data-page="enjoy" style="font-size:0.7rem;">🎉 享福</button>
+      <button class="nav-button" data-page="settings" style="font-size:0.7rem;">⚙️ 设置</button>
     </nav>
 
     <!-- Toast -->
@@ -460,7 +560,7 @@
         <div class="dialog-body">
           <p class="cloud-login-hint" id="cloudLoginHint">使用家庭密码进入云端账本</p>
           <label class="field"><span>访问身份</span>
-            <select id="cloudRole"><option value="manager">酥梨 · 管理</option><option value="viewer">陈前 · 只读查看</option></select>
+            <select id="cloudRole"><option value="manager">陈前 · 管理</option><option value="viewer">欣然 · 只读查看</option></select>
           </label>
           <label class="field"><span>家庭密码</span><input id="cloudPassword" type="password" autocomplete="current-password" required minlength="12" placeholder="输入对应密码"></label>
           <button class="primary-button" id="cloudLoginSubmit" type="submit">进入账本</button>

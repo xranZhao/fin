@@ -10,7 +10,7 @@ export const DEFAULT_STATE = Object.freeze({
     role: "manager",
     people: {
       suli: {
-        name: "酥梨",
+        name: "欣然",
         workProfile: {
           referenceMonthlyIncome: 0,
           workDaysPerMonth: 22,
@@ -136,7 +136,7 @@ function normalizeSettings(settings = {}) {
     theme: allowedThemes.has(settings.theme) ? settings.theme : "system",
     role: allowedRoles.has(settings.role) ? settings.role : "manager",
     people: {
-      suli: normalizePerson(settings.people?.suli, "酥梨"),
+      suli: normalizePerson(settings.people?.suli, "欣然"),
       chenqian: normalizePerson(settings.people?.chenqian, "陈前"),
     },
   };
@@ -183,6 +183,17 @@ function normalizeSnapshot(snapshot = {}) {
         ? snapshot.expense.sourceMonths.filter((item) => /^\d{4}-(0[1-9]|1[0-2])$/.test(item)).slice(0, 24)
         : [],
       importedAt: snapshot.expense?.importedAt || "",
+      rawCsvBase64: String(snapshot.expense?.rawCsvBase64 || "").slice(0, 500000),
+      rawCsvFileName: String(snapshot.expense?.rawCsvFileName || "").slice(0, 180),
+    },
+    travel: {
+      legs: Array.isArray(snapshot.travel?.legs)
+        ? snapshot.travel.legs.map(l => ({
+            start: /^\d{4}-\d{2}-\d{2}$/.test(l?.start || "") ? l.start : "",
+            end: /^\d{4}-\d{2}-\d{2}$/.test(l?.end || "") ? l.end : "",
+            dest: String(l?.dest || "").slice(0, 60),
+          })).filter(l => l.start || l.end || l.dest)
+        : [],
     },
     note: String(snapshot.note || "").slice(0, 200),
     createdAt: snapshot.createdAt || now,
@@ -208,7 +219,7 @@ export function normalizeState(input = {}) {
       ...rawSettings,
       people: {
         suli: {
-          name: rawPeople.suli?.name || "酥梨",
+          name: rawPeople.suli?.name || "欣然",
           workProfile: migrateWorkProfileV1toV2(v1Suli),
         },
         chenqian: {

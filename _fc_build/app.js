@@ -36,8 +36,8 @@ const cloudApiBase = String(window.FAMILY_FINANCE_API_BASE || "").replace(/\/$/,
 const cloudTokenKey = "family-finance-cloud-session";
 
 function cloudUrl(path) { return `${cloudApiBase}${path}`; }
-function readCloudToken() { return sessionStorage.getItem(cloudTokenKey) || ""; }
-function clearCloudToken() { sessionStorage.removeItem(cloudTokenKey); }
+function readCloudToken() { return localStorage.getItem(cloudTokenKey) || ""; }
+function clearCloudToken() { localStorage.removeItem(cloudTokenKey); }
 
 function money(v) { return moneyFmt.format(Number(v) || 0).replace("CN¥", "¥"); }
 function num(v) { return numFmt.format(Number(v) || 0); }
@@ -74,9 +74,23 @@ async function syncCloudState() {
     showToast("已同步到家庭云端");
   } catch (error) {
     if (error.status === 409) {
-      showToast("另一台设备已更新数据，请重新加载后再保存");
+      showToast("云端已被更新，正在自动合并…");
+      try {
+        // 全量合并：拉取最新 → 本地月份覆盖云端同月 → 追加新月份
+        const fresh = await cloudAdapter.load();
+        const mergedMap = new Map(fresh.snapshots.map(s => [s.month, s]));
+        for (const localSnap of state.snapshots) {
+          mergedMap.set(localSnap.month, localSnap);
+        }
+        fresh.snapshots = [...mergedMap.values()].sort((a, b) => a.month.localeCompare(b.month));
+        state = await cloudAdapter.save(fresh);
+        showToast("已自动合并并同步到云端");
+      } catch (retryErr) {
+        showToast("合并失败，请稍后重新保存");
+        throw retryErr;
+      }
     } else {
-      showToast("本机已保存，但云端同步失败，请检查网络后重试");
+      showToast("本机已保存，云端同步失败：" + (error.message || "网络异常"));
     }
     throw error;
   }
@@ -120,13 +134,13 @@ async function setupCloudMode() {
   } catch {
     return;
   }
-  cloudMode = true;
   const token = readCloudToken();
   if (!token) { openCloudLogin(); return; }
   cloudAdapter = new RemoteStateAdapter(cloudApiBase, token);
   const sessionResponse = await fetch(cloudUrl("/api/session"), { headers: { Authorization: `Bearer ${token}` } });
   if (sessionResponse.ok) {
     cloudSession = await sessionResponse.json();
+    cloudMode = true;
     try {
       await loadCloudStateAfterLogin();
     } catch (error) {
@@ -135,6 +149,7 @@ async function setupCloudMode() {
   } else {
     clearCloudToken();
     cloudAdapter = null;
+    cloudMode = false;
     openCloudLogin();
   }
 }
@@ -192,7 +207,7 @@ function withDemoData() {
       people: {
         suli: {
           ...state.settings.people.suli,
-          name: "酥梨",
+          name: "欣然",
           workProfile: {
             ...state.settings.people.suli.workProfile,
             referenceMonthlyIncome: 8800, workDaysPerMonth: 22, workHoursPerDay: 8,
@@ -236,6 +251,8 @@ function navigateTo(pageName) {
   else if (pageName === "life") { renderLife(); setText("headerMonthLabel", "生命能量"); }
   else if (pageName === "analysis") { renderAnalysis(); setText("headerMonthLabel", "支出分析"); }
   else if (pageName === "summary") { renderSummary(); setText("headerMonthLabel", "家庭财务总结"); }
+  else if (pageName === "settings") { renderSettingsPage(); setText("headerMonthLabel", "家庭设置"); }
+  else if (pageName === "enjoy") { renderEnjoy(); setText("headerMonthLabel", "享福"); }
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -292,6 +309,117 @@ function renderCategoryList(containerId, breakdown, hourlyRate) {
   }).join("");
 }
 
+// ---- 二级分类明细渲染 ----
+function renderSubcategoryDetail(containerId, subBreakdown, catBreakdown) {
+  const el = byId(containerId);
+  if (!el) return;
+  if (!subBreakdown || Object.keys(subBreakdown).length === 0) {
+    el.innerHTML = '<p style="color:var(--ink-faint);font-size:0.74rem;">暂无二级分类数据。请确认钱迹导出包含"二级分类"列。</p>';
+    return;
+  }
+  const total = catBreakdown ? Object.values(catBreakdown).reduce((a, b) => a + b, 0) : 1;
+  let html = "";
+  for (const [cat, subs] of Object.entries(subBreakdown)) {
+    if (!subs || Object.keys(subs).length === 0) continue;
+    const catAmt = catBreakdown?.[cat] || 0;
+    html += '<div style="margin-bottom:0.4rem;"><strong style="font-size:0.72rem;">' + esc(cat) + ' · ' + money(catAmt) + '</strong></div>';
+    const subTotal = Object.values(subs).reduce((a, b) => a + b, 0);
+    html += Object.entries(subs).map(([sub, amt]) => {
+      const pct = Math.round(amt / subTotal * 100);
+      return '<div class="category-row" style="padding-left:0.5rem;margin-bottom:0.12rem;">' +
+        '<span style="font-size:0.68rem;color:var(--ink-soft);width:7rem;">' + esc(sub) + '</span>' +
+        '<div class="category-bar" style="flex:1;"><span style="width:' + pct + '%;background:var(--accent-soft);"></span></div>' +
+        '<span style="font-family:var(--font-number);font-size:0.7rem;white-space:nowrap;">' + money(amt) + ' (' + pct + '%)</span></div>';
+    }).join("");
+    html += '<div style="height:0.3rem;"></div>';
+  }
+  el.innerHTML = html;
+}
+
+// ---- AI 智能诊断（基于CSV数据，不做武断判断）----
+function renderAIDiagnosis(sn, hourlyRate) {
+  const el = byId("analysisAIDiagnosis");
+  if (!el) return;
+  const cats = sn.expense.categoryBreakdown || {};
+  const subCats = sn.expense.subcategoryBreakdown || {};
+  const total = Object.values(cats).reduce((a, b) => a + b, 0);
+  const diagnoses = [];
+
+  // 1. 找出占比最高的二级分类（它在哪个一级分类下贡献最大）
+  const topSubs = [];
+  for (const [cat, subs] of Object.entries(subCats)) {
+    for (const [sub, amt] of Object.entries(subs)) {
+      topSubs.push({ cat, sub, amt, pct: amt / total * 100 });
+    }
+  }
+  topSubs.sort((a, b) => b.amt - a.amt);
+  const top3Subs = topSubs.slice(0, 3);
+  if (top3Subs.length > 0) {
+    diagnoses.push('🔍 <strong>支出前三小类：</strong>' +
+      top3Subs.map(s => esc(s.sub) + ' ' + money(s.amt) + '（' + numFmt.format(s.pct) + '%）').join(' · '));
+  }
+
+  // 2. 对占比超过30%的一级分类做二级拆解
+  for (const [cat, amt] of Object.entries(cats)) {
+    const pct = amt / total * 100;
+    if (pct > 30) {
+      const subs = subCats[cat] || {};
+      const subEntries = Object.entries(subs).sort((a, b) => b[1] - a[1]).slice(0, 3);
+      if (subEntries.length > 0) {
+        const subDetails = subEntries.map(([s, v]) => esc(s) + ' ' + money(v)).join(' · ');
+        diagnoses.push('📊 <strong>' + esc(cat) + '</strong> 占 ' + numFmt.format(pct) + '%——主要花在：' + subDetails);
+      } else {
+        diagnoses.push('📊 <strong>' + esc(cat) + '</strong> 占 ' + numFmt.format(pct) + '%——暂无二级分类明细，建议在钱迹里细化分类');
+      }
+    }
+  }
+
+  // 3. 同比上月
+  const [y, m] = sn.month.split("-").map(Number);
+  const prevM = m - 1 > 0 ? m - 1 : 12;
+  const prevY = m - 1 > 0 ? y : y - 1;
+  const prevMonth = prevY + "-" + String(prevM).padStart(2, "0");
+  const prevSn = state.snapshots.find(s => s.month === prevMonth);
+  if (prevSn && prevSn.expense.confirmedTotal > 0) {
+    const prevTotal = prevSn.expense.confirmedTotal;
+    const delta = total - prevTotal;
+    const deltaPct = prevTotal > 0 ? delta / prevTotal * 100 : 0;
+    const dir = delta >= 0 ? "增加" : "减少";
+    diagnoses.push('📈 相比上月（' + monthLabel(prevMonth) + '）：支出' + dir + '了 ' + money(Math.abs(delta)) + '（' + numFmt.format(Math.abs(deltaPct)) + '%）');
+
+    // 变化>5%的分类
+    const allCats = new Set([...Object.keys(cats), ...Object.keys(prevSn.expense.categoryBreakdown || {})]);
+    for (const cat of allCats) {
+      const cur = cats[cat] || 0;
+      const prev = (prevSn.expense.categoryBreakdown || {})[cat] || 0;
+      if (Math.abs(cur - prev) > Math.max(total * 0.05, 200)) {
+        const d = cur - prev;
+        diagnoses.push('  → ' + esc(cat) + '：' + money(prev) + ' → ' + money(cur) + '（' + (d >= 0 ? '↑' : '↓') + money(Math.abs(d)) + '）');
+      }
+    }
+  }
+
+  // 4. 同比去年同月
+  const lyMonth = (y - 1) + "-" + String(m).padStart(2, "0");
+  const lySn = state.snapshots.find(s => s.month === lyMonth);
+  if (lySn && lySn.expense.confirmedTotal > 0) {
+    const lyTotal = lySn.expense.confirmedTotal;
+    const delta = total - lyTotal;
+    const deltaPct = lyTotal > 0 ? delta / lyTotal * 100 : 0;
+    diagnoses.push('🗓 相比去年同月（' + monthLabel(lyMonth) + '）：支出' + (delta >= 0 ? '增加' : '减少') + '了 ' + money(Math.abs(delta)) + '（' + numFmt.format(Math.abs(deltaPct)) + '%）');
+  }
+
+  // 5. 生命时间
+  if (hourlyRate > 0) {
+    const lifeHr = total / hourlyRate;
+    diagnoses.push('⏳ 本月支出换走约 <strong>' + numFmt.format(lifeHr) + ' 小时</strong>生命时间（≈' + numFmt.format(lifeHr / 8) + ' 个工作日）');
+  }
+
+  if (diagnoses.length === 0) diagnoses.push("✅ 暂无足够数据进行分析。至少需要一个月的数据。");
+
+  el.innerHTML = diagnoses.map(d => '<div class="advice-item"><span class="advice-number">💡</span><p style="font-size:0.76rem;line-height:1.55;">' + d + '</p></div>').join("");
+}
+
 // ================================================================
 // 1. 总览
 // ================================================================
@@ -335,7 +463,8 @@ function renderOverview() {
   budgetLine.style.width = `${Math.min(usedPct, 100)}%`;
   budgetLine.classList.toggle("over-budget", usedPct > 100);
   setText("spendingCardBalance", `花销卡 ${money(report.latest.accounts.familySpendingBalance)}`);
-  setText("budgetRemaining", `剩余 ${money(Math.max(0, budget - m.expense))}`);
+  setText("budgetActual", `实际 ${money(m.expense)}`);
+  setText("budgetRemaining", `${m.expense > budget ? "超出" : "剩余"} ${money(Math.max(0, budget - m.expense))}`);
 
   // 双人矩阵
   const su = report.latest.people.suli;
@@ -413,9 +542,29 @@ function genAdvice(report, budget) {
   return adv.slice(0, 3);
 }
 
-// ================================================================
-// 2. 月度记录
-// ================================================================
+// 累进转入计算（协议第2.2条）
+function calcTransferRule(income) {
+  const i = Number(income) || 0;
+  if (i <= 10000) return { transfer: Math.round(i * 0.8 * 100) / 100, rate: 80 };
+  if (i <= 20000) return { transfer: Math.round((8000 + (i - 10000) * 0.9) * 100) / 100, rate: 90 };
+  if (i <= 30000) return { transfer: Math.round((17000 + (i - 20000) * 0.95) * 100) / 100, rate: 95 };
+  return { transfer: Math.round((26500 + (i - 30000) * 0.98) * 100) / 100, rate: 98 };
+}
+
+function autoFillTransfers() {
+  const suliIncome = safeNum(byId("suliIncome")?.value);
+  const chenqianIncome = safeNum(byId("chenqianIncome")?.value);
+  if (suliIncome > 0) {
+    const r = calcTransferRule(suliIncome);
+    byId("suliTransfer").value = r.transfer;
+    byId("suliKept").value = Math.round((suliIncome - r.transfer) * 100) / 100;
+  }
+  if (chenqianIncome > 0) {
+    const r = calcTransferRule(chenqianIncome);
+    byId("chenqianTransfer").value = r.transfer;
+    byId("chenqianKept").value = Math.round((chenqianIncome - r.transfer) * 100) / 100;
+  }
+}
 function renderEntry() {
   byId("entryMonth").value = selectedMonth;
   byId("csvUploadResult").hidden = true;
@@ -433,12 +582,21 @@ function renderEntry() {
     byId("confirmedExpense").value = snap.expense.confirmedTotal || "";
     byId("monthlyNote").value = snap.note || "";
     if (snap.expense.autoTotal && snap.expense.sourceFileName) showCsvResult(snap);
+    if (snap.expense.rawCsvBase64) {
+      byId("csvUploadResult").hidden = false;
+      byId("csvUploadResult").className = "upload-result";
+      byId("csvUploadResult").innerHTML = '已存档原始CSV：' + esc(snap.expense.sourceFileName || "未知文件") + '<br><small style="color:var(--ink-faint)">点击上传可覆盖</small>';
+    }
+    // 恢复旅游标记
+    const legs = snap.travel?.legs || [{ start: snap.travel?.start || "", end: snap.travel?.end || "", dest: snap.travel?.dest || "" }];
+    restoreTravelLegs(legs);
     setText("headerMonthLabel", "编辑已有记录");
   } else {
     ["spendingBalance","savingsBalanceEntry","suliIncome","suliTransfer","suliKept","chenqianIncome","chenqianTransfer","chenqianKept","confirmedExpense","monthlyNote"].forEach(id => {
       const el = byId(id);
       if (el) { if (el.tagName === "TEXTAREA") el.value = ""; else el.value = ""; }
     });
+    restoreTravelLegs([{ start: "", end: "", dest: "" }]);
     setText("headerMonthLabel", "新建月度记录");
   }
 }
@@ -449,26 +607,39 @@ function showCsvResult(snap) {
   el.className = "upload-result";
   const cats = snap.expense.categoryBreakdown || {};
   const top3 = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${money(v)}`).join(" · ");
-  el.innerHTML = `已解析 ${snap.expense.sourceFileName || ""}<br>${snap.expense.recordCount} 笔 · 合计 ${money(snap.expense.confirmedTotal)}<br>${top3 || "无分类数据"}`;
+  el.innerHTML = `已解析 ${snap.expense.sourceFileName || ""}<br>${snap.expense.recordCount} 笔 · 合计 ${money(snap.expense.confirmedTotal)}<br>${top3 || "无分类数据"}${snap.expense.rawCsvBase64 ? '<br><small style="color:var(--ink-faint)">原始CSV已存档</small>' : ''}`;
   byId("confirmedExpense").value = snap.expense.confirmedTotal;
 }
 
 async function handleCsvUpload(file) {
+  // 立即反馈
+  const el = byId("csvUploadResult");
+  el.hidden = false;
+  el.className = "upload-result";
+  el.innerHTML = `<em>正在解析 ${file.name}…</em>`;
+
   try {
     const summary = await summarizeQianjiFile(file, selectedMonth);
     uploadedSummary = summary;
+
+    // 保存原始CSV base64
+    const rawBuffer = await file.arrayBuffer();
+    const rawBase64 = btoa(String.fromCharCode(...new Uint8Array(rawBuffer)));
+    uploadedSummary.rawCsvBase64 = rawBase64;
+    uploadedSummary.rawCsvFileName = file.name;
+
     const cats = summary.categoryBreakdown || {};
+    const total = Object.values(cats).reduce((a, b) => a + b, 0) || 0;
     const top3 = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${money(v)}`).join(" · ");
-    const el = byId("csvUploadResult");
-    el.hidden = false;
+    const pctStr = summary.skippedRows > 0 ? `（跳过 ${summary.skippedRows} 条收入/退款/其他月份）` : "";
+
     el.className = "upload-result";
-    el.innerHTML = `${file.name}<br>${summary.matchedRows} 笔 · 合计 ${money(summary.total)}<br>${top3 || "无分类数据"}`;
+    el.innerHTML = `✅ ${file.name}<br>${summary.matchedRows} 笔有效支出 · 合计 <strong>${money(summary.total)}</strong><br>${top3 || "无分类数据"}${pctStr ? '<br>' + pctStr : ''}`;
     byId("confirmedExpense").value = summary.total;
+    showToast(`CSV解析完成：${summary.matchedRows} 笔 · ${money(summary.total)}`);
   } catch (err) {
-    const el = byId("csvUploadResult");
-    el.hidden = false;
     el.className = "upload-result error";
-    el.textContent = err.message;
+    el.innerHTML = `❌ ${file.name}<br>${err.message}<br><small>请确认文件是钱迹导出的有效CSV，且包含目标月份的支出记录。</small>`;
     uploadedSummary = null;
   }
 }
@@ -495,15 +666,21 @@ async function saveSnapshot(e) {
       confirmedTotal: safeNum(byId("confirmedExpense").value),
       recordCount: uploadedSummary?.matchedRows || (existing?.expense?.recordCount || 0),
       categoryBreakdown: uploadedSummary?.categoryBreakdown || (existing?.expense?.categoryBreakdown || {}),
+      subcategoryBreakdown: uploadedSummary?.subcategoryBreakdown || (existing?.expense?.subcategoryBreakdown || {}),
       sourceFileName: uploadedSummary?.sourceFileName || (existing?.expense?.sourceFileName || ""),
       sourceMonths: uploadedSummary?.sourceMonths || (existing?.expense?.sourceMonths || []),
       importedAt: uploadedSummary?.importedAt || (existing?.expense?.importedAt || ""),
+      rawCsvBase64: uploadedSummary?.rawCsvBase64 || (existing?.expense?.rawCsvBase64 || ""),
+      rawCsvFileName: uploadedSummary?.rawCsvFileName || (existing?.expense?.rawCsvFileName || ""),
+    },
+    travel: {
+      legs: collectTravelLegs(),
     },
     note: (byId("monthlyNote").value || "").trim().slice(0, 200),
   };
 
   state = upsertSnapshot(state, snap);
-  try { await syncCloudState(); } catch { return; }
+  try { await syncCloudState(); } catch { /* syncCloudState 已 toast */ }
   showToast(`${monthLabel(month)} 已保存`);
   navigateTo("overview");
 }
@@ -593,6 +770,8 @@ function renderAnalysis() {
 
   renderCategoryList("analysisCategoryList", sn.expense.categoryBreakdown, fm.familyHourlyRate);
 
+  // 二级分类明细
+  renderSubcategoryDetail("analysisSubcategoryList", sn.expense.subcategoryBreakdown, sn.expense.categoryBreakdown);
   // 关键项目
   const cats = sn.expense.categoryBreakdown || {};
   const sorted = Object.entries(cats).sort((a, b) => b[1] - a[1]);
@@ -603,6 +782,9 @@ function renderAnalysis() {
   } else {
     byId("analysisKeyItems").hidden = true;
   }
+
+  // AI 诊断
+  renderAIDiagnosis(sn, fm.familyHourlyRate);
 
   // 一句话
   let adv = "";
@@ -670,45 +852,210 @@ function renderSummary() {
   if (m.operatingBalance >= 0) adv.push(`经营结余 ${money(m.operatingBalance)}，财务状况健康。`);
   else adv.push(`经营赤字 ${money(Math.abs(m.operatingBalance))}，确认是否有大额一次性支出。`);
   adv.push(`家庭储蓄率 ${numFmt.format(m.transferRate * 100)}%，两人共转入 ${money(m.totalTransfer)}。`);
-  byId("summaryAdviceList").innerHTML = adv.map((a, i) => `<div class="advice-item"><span class="advice-number">${i + 1}</span><p>${esc(a)}</p></div>`).join("");
+  byId("summaryAdviceList").innerHTML = adv.map((a, i) => '<div class="advice-item"><span class="advice-number">' + (i + 1) + '</span><p>' + esc(a) + '</p></div>').join("");
+}
+
+// ---- 享福辅助函数 ----
+function collectTravelLegs() {
+  const starts = document.querySelectorAll(".travel-start");
+  const ends = document.querySelectorAll(".travel-end");
+  const dests = document.querySelectorAll(".travel-dest");
+  const legs = [];
+  for (let i = 0; i < starts.length; i++) {
+    const s = (starts[i]?.value || "").trim();
+    const e = (ends[i]?.value || "").trim();
+    const d = (dests[i]?.value || "").trim().slice(0, 60);
+    if (s || e || d) legs.push({ start: s, end: e, dest: d });
+  }
+  return legs;
+}
+
+function restoreTravelLegs(legs) {
+  const container = byId("travelLegsContainer");
+  if (!container) return;
+  const existing = container.querySelectorAll(".travel-leg");
+  existing.forEach((el, i) => { if (i > 0) el.remove(); });
+  const valid = (legs || []).filter(l => l.start || l.end || l.dest);
+  const data = valid.length ? valid : [{ start: "", end: "", dest: "" }];
+  data.forEach((leg, i) => {
+    if (i === 0) {
+      const first = existing[0];
+      if (first) {
+        first.querySelector(".travel-start").value = leg.start || "";
+        first.querySelector(".travel-end").value = leg.end || "";
+        first.querySelector(".travel-dest").value = leg.dest || "";
+      }
+    } else {
+      addTravelLegRow(leg);
+    }
+  });
+}
+
+function addTravelLegRow(leg) {
+  const container = byId("travelLegsContainer");
+  if (!container) return;
+  const row = document.createElement("div");
+  row.className = "travel-leg";
+  row.style.cssText = "display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.4rem;align-items:end;margin-bottom:0.4rem;";
+  row.innerHTML =
+    '<div class="field"><input type="date" class="travel-start" value="' + esc(leg?.start || "") + '" aria-label="旅游开始日期"></div>' +
+    '<div class="field"><input type="date" class="travel-end" value="' + esc(leg?.end || "") + '" aria-label="旅游结束日期"></div>' +
+    '<div class="field"><input type="text" class="travel-dest" maxlength="60" value="' + esc(leg?.dest || "") + '" placeholder="莫干山" aria-label="目的地"></div>' +
+    '<button type="button" class="icon-button remove-travel-btn" style="align-self:flex-end;margin-bottom:0.15rem;" title="删除此行">✕</button>';
+  container.appendChild(row);
+  row.querySelector(".remove-travel-btn").addEventListener("click", function () {
+    const all = container.querySelectorAll(".travel-leg");
+    if (all.length <= 1) return;
+    row.remove();
+  });
 }
 
 // ================================================================
-// 6. 设置对话框
+// 7. 享福
 // ================================================================
-function openSettings() {
+// 享福页渲染
+function renderEnjoy() {
+  const snaps = sortedSnapshots();
+  const months = [...new Set(snaps.map(s => s.month))].sort((a, b) => b.localeCompare(a));
+  monthOnlySelect("enjoyMonthSelect", months);
+
+  const sn = state.snapshots.find(s => s.month === selectedMonth);
+  const legs = (sn?.travel?.legs && sn.travel.legs.length)
+    ? sn.travel.legs
+    : (sn?.travel?.start ? [{ start: sn.travel.start, end: sn.travel.end, dest: sn.travel.dest }] : []);
+  const hasTravel = sn && legs.length > 0 && legs.some(l => l.start && l.end);
+  byId("enjoyEmpty").hidden = hasTravel;
+  byId("enjoyContent").hidden = !hasTravel;
+  if (!hasTravel) return;
+
+  // 遍历所有行程，从 CSV 提取消费
+  const allCat = {};
+  const allSub = {};
+  let allTotal = 0;
+  let allDays = 0;
+
+  if (sn.expense.rawCsvBase64) {
+    try {
+      const csvText = atob(sn.expense.rawCsvBase64);
+      const rows = [];
+      let row = [], field = "", quoted = false;
+      for (let i = 0; i < csvText.length; i++) {
+        const ch = csvText[i];
+        if (quoted) {
+          if (ch === '"' && csvText[i + 1] === '"') { field += '"'; i++; }
+          else if (ch === '"') { quoted = false; }
+          else { field += ch; }
+        } else if (ch === '"') { quoted = true; }
+        else if (ch === ",") { row.push(field); field = ""; }
+        else if (ch === "\n") { row.push(field.replace(/\r$/, "")); if (row.some(x => x.trim())) rows.push(row); row = []; field = ""; }
+        else { field += ch; }
+      }
+      const hdrs = rows[0].map(h => String(h || "").replace(/^﻿/, "").trim());
+      const dIdx = hdrs.findIndex(h => ["时间","日期","交易时间","记账时间"].includes(h));
+      const tIdx = hdrs.findIndex(h => ["类型","收支类型","账单类型"].includes(h));
+      const aIdx = hdrs.findIndex(h => ["金额","金额(元)","金额（元）","交易金额"].includes(h));
+      const cIdx = hdrs.findIndex(h => ["分类","一级分类"].includes(h));
+      const sIdx = hdrs.findIndex(h => ["二级分类","子分类"].includes(h));
+
+      for (const leg of legs) {
+        if (!leg.start || !leg.end) continue;
+        const st = new Date(leg.start), en = new Date(leg.end);
+        const dCount = Math.round((en - st) / (1000 * 60 * 60 * 24)) + 1;
+        allDays += dCount;
+        rows.slice(1).forEach(r => {
+          if (dIdx < 0 || tIdx < 0 || aIdx < 0) return;
+          const dm = String(r[dIdx] || "").match(/(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})/);
+          if (!dm) return;
+          const rd = new Date(dm[1] + "-" + dm[2] + "-" + dm[3]);
+          if (rd < st || rd > en) return;
+          if (String(r[tIdx] || "").trim() !== "支出") return;
+          const amt = Number(String(r[aIdx] || "0").replace(/[¥￥,\s]/g, ""));
+          if (amt <= 0) return;
+          const cat = String(r[cIdx] || "未分类").trim() || "未分类";
+          const sub = sIdx >= 0 ? String(r[sIdx] || "").trim() : "";
+          allTotal += amt;
+          allCat[cat] = (allCat[cat] || 0) + amt;
+          if (sub) { if (!allSub[cat]) allSub[cat] = {}; allSub[cat][sub] = (allSub[cat][sub] || 0) + amt; }
+        });
+      }
+      allTotal = Math.round(allTotal * 100) / 100;
+      for (const k of Object.keys(allCat)) allCat[k] = Math.round(allCat[k] * 100) / 100;
+    } catch (e) { /* CSV 解码失败 */ }
+  }
+
+  const destNames = legs.filter(l => l.dest).map(l => l.dest).join(" · ") || "未指定目的地";
+  byId("enjoyDest").textContent = destNames;
+  byId("enjoyTotal").textContent = money(allTotal);
+  byId("enjoyAvg").textContent = allDays > 0 ? money(allTotal / allDays) : money(0);
+
+  renderCategoryList("enjoyCategoryList", allCat, 0);
+  if (byId("enjoyDetailList")) renderSubcategoryDetail("enjoyDetailList", allSub, allCat);
+
+  const fm = getLifeMetrics(sn);
+  const hourly = fm.familyHourlyRate;
+  if (hourly > 0) {
+    const lifeHr = allTotal / hourly;
+    setText("enjoyLifeHours", numFmt.format(lifeHr));
+    setText("enjoyLifeDays", numFmt.format(lifeHr / 8));
+    const lostWage = hourly * 8 * allDays;
+    setText("enjoyLostWage", money(lostWage));
+    const avgPerDay = allTotal / Math.max(allDays, 1);
+    const verdictEl = byId("enjoyVerdict");
+    if (avgPerDay < hourly * 3) {
+      verdictEl.innerHTML = '这' + legs.length + '趟旅行日均 ' + money(avgPerDay) + '，不到半天工资——<strong>太值了。</strong>';
+    } else if (avgPerDay < hourly * 8) {
+      verdictEl.innerHTML = '这' + legs.length + '趟旅行日均 ' + money(avgPerDay) + '，差不多一天工资——<strong>值。</strong>';
+    } else {
+      verdictEl.innerHTML = '这' + legs.length + '趟旅行日均 ' + money(avgPerDay) + '，超过一天工资。回忆无价——<strong>只要两个人都开心就值。</strong>';
+    }
+  } else {
+    setText("enjoyLifeHours", "—（请先在设置中填写工作资料）");
+  }
+}
+
+// ================================================================
+// 6. 设置独立页面
+// ================================================================
+function renderSettingsPage() {
   const s = state.settings;
   const su = s.people.suli;
   const cq = s.people.chenqian;
-  const body = byId("settingsBody");
+  const isViewer = cloudMode ? cloudSession?.role === "viewer" : s.role === "viewer";
+  const d = isViewer ? " disabled" : "";
+  const body = byId("settingsPageBody");
+  const saveBtn = byId("saveSettingsBtn");
+
+  if (isViewer) {
+    body.innerHTML = '<p style="color:var(--ink-soft);">只读模式下设置仅供查看，不能修改。</p>' +
+      '<div class="card card-spacious"><h2>当前设置</h2><p style="color:var(--ink-soft);font-size:0.78rem;">月度预算：' + money(s.monthlyBudget) + ' · 储蓄目标：' + money(s.savingsGoal) + '</p></div>';
+    if (saveBtn) saveBtn.style.display = "none";
+    return;
+  }
 
   body.innerHTML = `
-    <div class="settings-group">
-      <h3>家庭默认值</h3>
+    <div class="card card-spacious">
+      <h2>家庭默认值</h2>
+      <br>
       <div class="field-grid two-columns">
-        <div class="field"><span>月度花费预算</span><div class="money-input"><b>¥</b><input type="number" id="setBudget" value="${s.monthlyBudget}" inputmode="decimal" step="100" min="0"></div></div>
-        <div class="field"><span>家庭储蓄目标</span><div class="money-input"><b>¥</b><input type="number" id="setSavingsGoal" value="${s.savingsGoal}" inputmode="decimal" step="1000" min="0"></div></div>
+        <div class="field"><span>月度花费预算</span><div class="money-input"><b>¥</b><input type="number" id="setBudget" value="${s.monthlyBudget}"${d} inputmode="decimal" step="100" min="0"></div></div>
+        <div class="field"><span>家庭储蓄目标</span><div class="money-input"><b>¥</b><input type="number" id="setSavingsGoal" value="${s.savingsGoal}"${d} inputmode="decimal" step="1000" min="0"></div></div>
       </div>
     </div>
-    <div class="settings-group">
-      <h3>显示名称</h3>
-      <div class="field-grid dual-input">
-        <div class="field"><span>酥梨</span><input type="text" id="setSuliName" value="${esc(su.name)}" maxlength="20"></div>
-        <div class="field"><span>陈前</span><input type="text" id="setChenqianName" value="${esc(cq.name)}" maxlength="20"></div>
-      </div>
-    </div>
-    <div class="settings-group">
-      <h3>酥梨 · 工作资料</h3>
-      ${wpFields("suli", su.workProfile)}
+    <div class="card card-spacious">
+      <h2>欣然 · 工作资料</h2>
+      <br>
+      ${wpFields("suli", su.workProfile, d)}
       <div class="calc-preview" id="calcPreviewSuli"></div>
     </div>
-    <div class="settings-group">
-      <h3>陈前 · 工作资料</h3>
-      ${wpFields("chenqian", cq.workProfile)}
+    <div class="card card-spacious">
+      <h2>陈前 · 工作资料</h2>
+      <br>
+      ${wpFields("chenqian", cq.workProfile, d)}
       <div class="calc-preview" id="calcPreviewChenqian"></div>
     </div>
-    <div class="settings-group">
-      <h3>备份与恢复</h3>
+    <div class="card card-spacious">
+      <h2>备份与恢复</h2>
+      <br>
       <div class="stacked-actions">
         <button class="secondary-button" type="button" id="exportBackupBtn">导出 JSON 备份</button>
         <label class="secondary-button file-button" style="cursor:pointer;">从备份恢复<input type="file" id="importBackupFile" accept=".json" hidden></label>
@@ -717,13 +1064,13 @@ function openSettings() {
     </div>
   `;
 
-  // 绑定事件
-  byId("closeSettingsButton").onclick = async () => { await saveSettingsFromDialog(); byId("settingsDialog").close(); };
-  byId("toggleRoleButton").onclick = toggleRole;
+  if (saveBtn) saveBtn.style.display = "";
+
+  // 事件绑定
   byId("exportBackupBtn").onclick = () => {
     const blob = new Blob([exportState(state)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `家庭财务备份_${new Date().toISOString().slice(0, 10)}.json`; a.click();
+    const a = document.createElement("a"); a.href = url; a.download = '家里有前备份_' + new Date().toISOString().slice(0, 10) + '.json'; a.click();
     URL.revokeObjectURL(url);
     showToast("备份已下载");
   };
@@ -732,37 +1079,56 @@ function openSettings() {
       const text = await e.target.files[0].text();
       state = importState(text);
       await syncCloudState();
-      skipNextSettingsSave = true;
-      byId("settingsDialog").close();
-      showToast("备份已恢复，页面即将刷新");
+      showToast("备份已恢复");
       setTimeout(() => location.reload(), 500);
     } catch (err) { showToast(err.message); }
   };
   byId("clearDataBtn").onclick = async () => {
-    if (!confirm("确定清空全部本地数据？此操作不可恢复。")) return;
+    if (!confirm("确定清空全部数据？此操作不可恢复。")) return;
     state = clearState();
     await syncCloudState();
-    byId("settingsDialog").close();
     location.reload();
   };
 
   // 实时预览
   ["suli", "chenqian"].forEach(k => updateCalcPreview(k));
-  settingsDirty = false;
-  byId("settingsDialog").showModal();
 }
 
-function wpFields(key, wp) {
+// 保存按钮 handler
+function saveSettingsFromPage() {
+  const ns = {
+    ...state.settings,
+    monthlyBudget: safeNum(byId("setBudget")?.value) || 3000,
+    savingsGoal: safeNum(byId("setSavingsGoal")?.value) || 100000,
+    people: {
+      suli: { name: "欣然", workProfile: readWorkProfile("suli") },
+      chenqian: { name: "陈前", workProfile: readWorkProfile("chenqian") },
+    },
+  };
+  state = saveSettings(state, ns);
+  applyTheme();
+  applyRole();
+  showToast("设置已保存");
+  setTimeout(function() { syncCloudState().catch(function() {}); }, 100);
+}
+
+// ================================================================
+// 旧设置对话框（保留给右上角快速入口兼容）
+// ================================================================
+function openSettings() { navigateTo("settings"); }
+
+function wpFields(key, wp, disabled) {
   const pfx = key === "suli" ? "setSuli" : "setChenqian";
+  const d = disabled || "";
   return `
     <div class="field-grid two-columns">
-      <div class="field"><span>参考税后月薪</span><div class="money-input"><b>¥</b><input type="number" id="${pfx}RefIncome" value="${wp.referenceMonthlyIncome || ""}" inputmode="decimal" step="100" min="0"></div></div>
-      <div class="field"><span>每月工作天数</span><input type="number" id="${pfx}WorkDays" value="${wp.workDaysPerMonth || 22}" inputmode="numeric" min="1" max="31"></div>
-      <div class="field"><span>每天工作小时</span><input type="number" id="${pfx}WorkHours" value="${wp.workHoursPerDay || 8}" inputmode="numeric" min="1" max="16" step="0.5"></div>
-      <div class="field"><span>每日通勤（分钟）</span><input type="number" id="${pfx}CommuteMin" value="${wp.commuteMinutesPerDay || ""}" inputmode="numeric" min="0"></div>
-      <div class="field"><span>每日工作餐成本</span><div class="money-input"><b>¥</b><input type="number" id="${pfx}MealCost" value="${wp.mealCostPerWorkday || ""}" inputmode="decimal" step="1" min="0"></div></div>
-      <div class="field"><span>每月通勤成本</span><div class="money-input"><b>¥</b><input type="number" id="${pfx}CommuteCost" value="${wp.commuteCostPerMonth || ""}" inputmode="decimal" step="10" min="0"></div></div>
-      <div class="field"><span>每月其他工作成本</span><div class="money-input"><b>¥</b><input type="number" id="${pfx}OtherCost" value="${wp.otherWorkCostPerMonth || ""}" inputmode="decimal" step="10" min="0"></div></div>
+      <div class="field"><span>参考税后月薪</span><div class="money-input"><b>¥</b><input type="number" id="${pfx}RefIncome" value="${wp.referenceMonthlyIncome || ""}"${d} inputmode="decimal" step="100" min="0"></div></div>
+      <div class="field"><span>每月工作天数</span><input type="number" id="${pfx}WorkDays" value="${wp.workDaysPerMonth || 22}"${d} inputmode="numeric" min="1" max="31"></div>
+      <div class="field"><span>每天工作小时</span><input type="number" id="${pfx}WorkHours" value="${wp.workHoursPerDay || 8}"${d} inputmode="numeric" min="1" max="16" step="0.5"></div>
+      <div class="field"><span>每日通勤（分钟）</span><input type="number" id="${pfx}CommuteMin" value="${wp.commuteMinutesPerDay || ""}"${d} inputmode="numeric" min="0"></div>
+      <div class="field"><span>每日工作餐成本</span><div class="money-input"><b>¥</b><input type="number" id="${pfx}MealCost" value="${wp.mealCostPerWorkday || ""}"${d} inputmode="decimal" step="1" min="0"></div></div>
+      <div class="field"><span>每月通勤成本</span><div class="money-input"><b>¥</b><input type="number" id="${pfx}CommuteCost" value="${wp.commuteCostPerMonth || ""}"${d} inputmode="decimal" step="10" min="0"></div></div>
+      <div class="field"><span>每月其他工作成本</span><div class="money-input"><b>¥</b><input type="number" id="${pfx}OtherCost" value="${wp.otherWorkCostPerMonth || ""}"${d} inputmode="decimal" step="10" min="0"></div></div>
     </div>`;
 }
 
@@ -796,11 +1162,11 @@ async function saveSettingsFromDialog() {
     savingsGoal: safeNum(byId("setSavingsGoal")?.value) || 100000,
     people: {
       suli: {
-        name: (byId("setSuliName")?.value || "").trim().slice(0, 20) || "酥梨",
+        name: "欣然",
         workProfile: readWorkProfile("suli"),
       },
       chenqian: {
-        name: (byId("setChenqianName")?.value || "").trim().slice(0, 20) || "陈前",
+        name: "陈前",
         workProfile: readWorkProfile("chenqian"),
       },
     },
@@ -831,15 +1197,11 @@ function readWorkProfile(key) {
 
 function toggleRole() {
   if (cloudMode) {
-    byId("settingsDialog").close();
     logoutCloud();
     return;
   }
-  const ns = { ...state.settings, role: state.settings.role === "manager" ? "viewer" : "manager" };
-  state = saveSettings(state, ns);
-  applyRole();
-  byId("settingsDialog").close();
-  navigateTo("overview");
+  // 本地模式不再支持对话框内切换角色
+  showToast("云端模式下登录时选择身份即可切换");
 }
 
 async function logoutCloud() {
@@ -857,8 +1219,19 @@ async function logoutCloud() {
 // 初始化
 // ================================================================
 async function init() {
-  await setupCloudMode();
-  if (!cloudMode) withDemoData();
+  // 先读本地数据（永远有，不会丢）
+  state = loadState();
+
+  // 尝试挂云端
+  try {
+    await setupCloudMode();
+  } catch {
+    // 云端连接失败或 token 过期都不要紧——本地数据还在
+  }
+
+  // demo 模式：仅当 URL 带了 ?demo=1 才启用
+  withDemoData();
+
   applyTheme();
   applyRole();
 
@@ -877,6 +1250,11 @@ async function init() {
     });
   });
 
+  // 返回按钮
+  document.querySelectorAll("[data-back]").forEach(btn => {
+    btn.addEventListener("click", () => navigateTo(btn.dataset.back));
+  });
+
   // 设置
   byId("settingsButton").addEventListener("click", openSettings);
   byId("logoutButton")?.addEventListener("click", logoutCloud);
@@ -893,7 +1271,8 @@ async function init() {
       if (!response.ok) throw new Error("密码不正确，请重试");
       cloudMode = true;
       cloudSession = await response.json();
-      sessionStorage.setItem(cloudTokenKey, cloudSession.token);
+      localStorage.setItem(cloudTokenKey, cloudSession.token);
+      localStorage.setItem(cloudTokenKey + "-role", cloudSession.role);
       cloudAdapter = new RemoteStateAdapter(cloudApiBase, cloudSession.token);
       await loadCloudStateAfterLogin();
       byId("cloudLoginDialog").close();
@@ -916,31 +1295,32 @@ async function init() {
   byId("entryMonth").addEventListener("change", (e) => { selectedMonth = e.target.value; renderEntry(); });
   byId("monthlyForm").addEventListener("submit", saveSnapshot);
   byId("deleteSnapshotButton").addEventListener("click", deleteSnapshot);
-  byId("csvFile").addEventListener("change", (e) => { if (e.target.files[0]) handleCsvUpload(e.target.files[0]); });
+  // CSV上传事件，同时读raw base64
+  byId("csvFile").addEventListener("change", (e) => {
+    if (!e.target.files[0]) return;
+    handleCsvUpload(e.target.files[0]);
+    // 重置input，允许重复上传同一文件
+    e.target.value = "";
+  });
+
+  // 工资自动计算：输入工资后自动填转入和个人留存
+  byId("suliIncome").addEventListener("input", autoFillTransfers);
+  byId("chenqianIncome").addEventListener("input", autoFillTransfers);
+
+  // 设置页保存按钮
+  const saveSettingsBtn = byId("saveSettingsBtn");
+  if (saveSettingsBtn) saveSettingsBtn.addEventListener("click", saveSettingsFromPage);
 
   // 生命能量交互
   byId("lifeTradeoffAmount")?.addEventListener("input", renderLife);
   byId("openLifeCalc")?.addEventListener("click", (e) => { e.preventDefault(); openSettings(); });
 
-  // 设置对话框关闭时保存并刷新
-  byId("settingsDialog").addEventListener("close", async () => {
-    if (skipNextSettingsSave) {
-      skipNextSettingsSave = false;
-      if (currentPage === "overview") renderOverview();
-      else if (currentPage === "life") renderLife();
-      else if (currentPage === "analysis") renderAnalysis();
-      else if (currentPage === "summary") renderSummary();
-      return;
-    }
-    await saveSettingsFromDialog();
-    if (currentPage === "overview") renderOverview();
-    else if (currentPage === "life") renderLife();
-    else if (currentPage === "analysis") renderAnalysis();
-    else if (currentPage === "summary") renderSummary();
-  });
-
   // PWA
   window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferredInstallPrompt = e; });
+
+  // 享福：添加行程行
+  const addTravelBtn = byId("addTravelLegBtn");
+  if (addTravelBtn) addTravelBtn.addEventListener("click", () => addTravelLegRow({ start: "", end: "", dest: "" }));
 
   // 初始渲染
   renderOverview();

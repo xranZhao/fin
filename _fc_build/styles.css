@@ -55,10 +55,10 @@
   --content-width: 820px;
   --safe-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
 
-  /* 字体栈 — 思源宋体 Heavy 标题 + 阿里惠普数字 + 正文无衬线 */
-  --font-title: "Source Han Serif SC", "Noto Serif SC", "Songti SC", serif;
+  /* 字体栈 — 思源黑体标题 + 阿里惠普数字 + 思源黑体正文 */
+  --font-title: "Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-number: "Alibaba PuHuiTi", "Outfit", "Impact", sans-serif;
-  --font-sans: Inter, "SF Pro Text", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-sans: "Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 
   /* 全局字号缩放至 80% */
   font-size: 13px; /* 基准 16px × 0.8 = 12.8px，取 13px */
@@ -189,7 +189,7 @@ h1 {
   margin-bottom: 0;
   font-family: var(--font-title);
   font-size: clamp(1.75rem, 7vw, 2.25rem);
-  font-weight: 400;
+  font-weight: 700;
   line-height: 1.12;
   letter-spacing: -0.02em;
 }
@@ -198,7 +198,7 @@ h2 {
   margin-bottom: 0.25rem;
   font-family: var(--font-title);
   font-size: 1.05rem;
-  font-weight: 400;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -265,6 +265,7 @@ h2 {
 .brand-title {
   font-family: var(--font-title);
   font-size: 0.9rem;
+  font-weight: 700;
 }
 
 .brand-subtitle {
@@ -293,6 +294,14 @@ h2 {
   font: inherit;
   font-size: 0.72rem;
   padding: 0.35rem;
+}
+
+.back-button {
+  display: inline-block;
+  margin-bottom: 0.3rem;
+  color: var(--accent-strong);
+  font-size: 0.7rem;
+  cursor: pointer;
 }
 
 .icon-button {
@@ -931,7 +940,7 @@ textarea { resize: vertical; line-height: 1.5; }
   z-index: 25;
   right: 0; bottom: 0; left: 0;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   width: min(100%, var(--content-width));
   margin: 0 auto;
   padding: 0.45rem 0.7rem max(0.45rem, env(safe-area-inset-bottom));
@@ -947,8 +956,9 @@ textarea { resize: vertical; line-height: 1.5; }
   background: transparent;
   border: 0;
   border-radius: 10px;
-  font-size: 0.76rem;
+  font-size: 0.7rem;
   font-weight: 550;
+  padding: 0.2rem 0.15rem;
   transition: color 180ms ease, background-color 180ms ease;
 }
 .nav-button.active {
@@ -1080,7 +1090,7 @@ textarea { resize: vertical; line-height: 1.5; }
 .viewer-only { display: none; }
 body.viewer-mode .viewer-only { display: inline-flex; }
 body.viewer-mode .manager-only { display: none !important; }
-body.viewer-mode #settingsButton { display: inline-flex !important; }
+body.viewer-mode #settingsButton { display: none !important; }
 body.viewer-mode .settings-group:not(:last-child),
 body.viewer-mode .dialog-footer { display: none; }
 body.viewer-mode .settings-group:last-child .stacked-actions > :not(#toggleRoleButton) { display: none; }
