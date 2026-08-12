@@ -28,6 +28,7 @@ function json(statusCode, payload, extra = {}) {
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
+      "Content-Disposition": "inline",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
       ...extra,
@@ -262,12 +263,16 @@ async function serveStatic(request) {
   try {
     const info = await stat(filePath);
     if (!info.isFile()) throw new Error("not file");
-    const content = request.method === "HEAD" ? "" : await readFile(filePath);
+    const content = request.method === "HEAD" ? "" : await readFile(filePath, "utf8");
     return {
       statusCode: 200,
-      headers: { "Content-Type": mimeTypes[extname(filePath)] || "application/octet-stream", "Cache-Control": requested === "index.html" ? "no-cache" : "public, max-age=300", ...securityHeaders() },
-      body: content.toString("base64"),
-      isBase64Encoded: true,
+      headers: {
+        "Content-Type": mimeTypes[extname(filePath)] || "text/plain; charset=utf-8",
+        "Content-Disposition": "inline",
+        "Cache-Control": requested === "index.html" ? "no-cache" : "public, max-age=300",
+        ...securityHeaders(),
+      },
+      body: content,
     };
   } catch {
     return json(404, { error: "资源不存在" });
