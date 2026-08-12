@@ -118,7 +118,7 @@ D:\CLAUDE\finance-systerm\PWA系统\family-finance-fc.zip
 | 函数类型 | 事件函数（HTTP 触发器调用） |
 | 函数名称 | `family-finance-pwa` |
 | 运行环境 | Node.js 20 |
-| 请求处理程序 | `cloud/index.handler` |
+| 请求处理程序 | `index.handler` |
 | 内存 | 256 MB |
 | 超时时间 | 30 秒 |
 | 实例并发度 | 1 |
