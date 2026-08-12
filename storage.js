@@ -436,7 +436,8 @@ export class RemoteStateAdapter {
       error.status = response.status;
       throw error;
     }
-    this.etag = response.headers.get("ETag") || "";
+    const rawEtag = response.headers.get("ETag") || "";
+    this.etag = rawEtag.replace(/^W\//i, "").replace(/^"(.*)"$/, "$1").trim();
     return normalizeState(await response.json());
   }
 
@@ -449,8 +450,10 @@ export class RemoteStateAdapter {
       body: JSON.stringify(normalizeState(state)),
     });
     if (response.status === 409) {
+      // 附带服务端 ETag 信息，方便客户端诊断
       const error = new Error("云端数据已经变化，请重新加载后再保存");
       error.status = 409;
+      try { const detail = await response.json(); if (detail.detail) error.message += ` (${detail.detail})`; } catch {}
       throw error;
     }
     if (!response.ok) {
@@ -458,7 +461,9 @@ export class RemoteStateAdapter {
       error.status = response.status;
       throw error;
     }
-    this.etag = response.headers.get("ETag") || this.etag;
+    // 标准化 ETag：去掉可能的引号，避免下一次请求格式不一致
+    const rawEtag = response.headers.get("ETag") || "";
+    this.etag = rawEtag.replace(/^W\//i, "").replace(/^"(.*)"$/, "$1").trim();
     return normalizeState(await response.json());
   }
 }

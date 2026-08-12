@@ -268,7 +268,10 @@ async function handleApi(request) {
     const norm = (s) => String(s || "").replace(/^W\//i, "").replace(/^"(.*)"$/, "$1").trim();
     const clientEtag = norm(rawClientEtag);
     const currentEtag = norm(current?.etag || "");
-    if (current && (!clientEtag || clientEtag !== currentEtag)) return json(409, { error: "云端数据已被另一台设备修改，请重新加载" });
+    if (current && (!clientEtag || clientEtag !== currentEtag)) {
+      console.log("ETag mismatch - client:", clientEtag, "server:", currentEtag, "raw client:", rawClientEtag, "raw server:", current?.etag);
+      return json(409, { error: "云端数据已被另一台设备修改，请重新加载", detail: `client:${clientEtag} server:${currentEtag}` });
+    }
     if (!current && rawClientEtag) return json(409, { error: "云端数据状态已变化，请重新加载" });
     const body = JSON.stringify(state);
     const response = await ossRequest("PUT", { body, contentType: "application/json; charset=utf-8" });

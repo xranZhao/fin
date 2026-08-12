@@ -97,7 +97,8 @@ async function syncCloudState(retriesLeft) {
     if (error.status === 409) {
       showToast("云端已被更新，正在自动合并…", "warning");
       try {
-        // 全量合并：拉取最新 → 本地月份覆盖云端同月 → 追加新月份
+        // ETag 过期：重置 adapter 的缓存 etag，重新拉取
+        cloudAdapter.etag = "";
         const fresh = await cloudAdapter.load();
         const mergedMap = new Map(fresh.snapshots.map(s => [s.month, s]));
         for (const localSnap of state.snapshots) {
@@ -109,10 +110,16 @@ async function syncCloudState(retriesLeft) {
         syncDirty = false;
         updateSyncStatus("synced");
       } catch (retryErr) {
+        // 二次 409：最后兜底 —— 完全重置后重试一次
+        if (retryErr.status === 409 && maxRetries > 0) {
+          showToast("合并冲突，再次尝试…", "syncing");
+          cloudAdapter.etag = "";
+          await new Promise(r => setTimeout(r, 1000));
+          try { await syncCloudState(maxRetries - 1); return; } catch { /* fall through */ }
+        }
         showToast("合并失败，请稍后重新保存", "error");
         syncDirty = true;
         updateSyncStatus("pending");
-        throw retryErr;
       }
     } else if (maxRetries > 0 && (error.message === "Failed to fetch" || error.message === "NetworkError" || (error.status && error.status >= 500))) {
       // 网络错误或服务端错误：指数退避重试
