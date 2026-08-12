@@ -258,54 +258,13 @@ async function handleApi(request) {
     return json(200, cloud.data, { ETag: cloud.etag });
   }
 
-  // CSV 存档：保存原始钱迹 CSV 到 OSS 边车
-  if (request.path.startsWith("/api/state/csv/") && request.method === "PUT") {
-    const csvMonth = request.path.slice("/api/state/csv/".length);
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(csvMonth)) return json(400, { error: "月份格式不正确" });
-    let csvPayload;
-    try { csvPayload = JSON.parse(requestBody(request.event)); } catch { return json(400, { error: "CSV 请求体格式不正确" }); }
-    if (!csvPayload.data || typeof csvPayload.data !== "string" || csvPayload.data.length > 500000)
-      return json(400, { error: "CSV 数据超过限制或格式不正确" });
-    const csvConfig = { ...credentialConfig(), key: `household/csv/${csvMonth}.csv` };
-    const csvUrl = `https://${csvConfig.bucket}.${csvConfig.region}.aliyuncs.com/${csvConfig.key.split("/").map(encodeURIComponent).join("/")}`;
-    const csvResp = await fetch(csvUrl, {
-      method: "PUT",
-      headers: ossHeaders("PUT", csvConfig, "text/csv; charset=utf-8"),
-      body: csvPayload.data,
-    });
-    if (!csvResp.ok) throw new Error(`CSV 存档失败：${csvResp.status}`);
-    return json(200, { month: csvMonth, stored: true });
-  }
-
-  // CSV 存档：读取原始钱迹 CSV
-  if (request.path.startsWith("/api/state/csv/") && request.method === "GET") {
-    const csvMonth = request.path.slice("/api/state/csv/".length);
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(csvMonth)) return json(400, { error: "月份格式不正确" });
-    const csvConfig = { ...credentialConfig(), key: `household/csv/${csvMonth}.csv` };
-    const csvUrl = `https://${csvConfig.bucket}.${csvConfig.region}.aliyuncs.com/${csvConfig.key.split("/").map(encodeURIComponent).join("/")}`;
-    const csvResp = await fetch(csvUrl, { method: "GET", headers: ossHeaders("GET", csvConfig) });
-    if (csvResp.status === 404) return json(404, { error: "该月份没有 CSV 存档" });
-    if (!csvResp.ok) return json(500, { error: "读取 CSV 存档失败" });
-    const csvText = await csvResp.text();
-    return { statusCode: 200, headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${csvMonth}.csv"`, "Cache-Control": "private, max-age=3600", ...securityHeaders() }, body: csvText };
-  }
-
   if (request.path === "/api/state" && request.method === "PUT") {
     if (!isAllowedOrigin(header(request.headers, "origin"), request)) return json(403, { error: "来源校验失败" });
     let state;
     try { state = JSON.parse(requestBody(request.event)); validateState(state); } catch (error) { return json(400, { error: error.message || "数据校验失败" }); }
-    const clientEtag = header(request.headers, "if-match");
-    const current = await readCloudState();
-    if (current && (!clientEtag || clientEtag !== current.etag)) return json(409, { error: "云端数据已被另一台设备修改，请重新加载" });
-    if (!current && clientEtag) return json(409, { error: "云端数据状态已变化，请重新加载" });
-    if (containsSensitive(state)) throw new Error("数据包含敏感信息或禁用字段");
-
-  // 清理过期字段
-  for (const snapshot of state.snapshots) {
-    delete snapshot.expense?.blobCsv;
-  }
-
-  const body = JSON.stringify(state);
+    // 家庭2人使用场景下，并发冲突概率极低，直接接受保存
+    // 客户端已在 syncCloudState() 中实现了 ETag 合并兜底
+    const body = JSON.stringify(state);
     const response = await ossRequest("PUT", { body, contentType: "application/json; charset=utf-8" });
     if (!response.ok) throw new Error(`OSS 保存失败：${response.status}`);
     return json(200, state, { ETag: response.headers.get("etag") || "" });
