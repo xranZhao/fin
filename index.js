@@ -262,10 +262,14 @@ async function handleApi(request) {
     if (!isAllowedOrigin(header(request.headers, "origin"), request)) return json(403, { error: "来源校验失败" });
     let state;
     try { state = JSON.parse(requestBody(request.event)); validateState(state); } catch (error) { return json(400, { error: error.message || "数据校验失败" }); }
-    const clientEtag = header(request.headers, "if-match");
+    const rawClientEtag = header(request.headers, "if-match");
     const current = await readCloudState();
-    if (current && (!clientEtag || clientEtag !== current.etag)) return json(409, { error: "云端数据已被另一台设备修改，请重新加载" });
-    if (!current && clientEtag) return json(409, { error: "云端数据状态已变化，请重新加载" });
+    // 标准化 ETag：去掉 W/ 前缀和引号后再比对，兼容不同 HTTP 库的引号处理差异
+    const norm = (s) => String(s || "").replace(/^W\//i, "").replace(/^"(.*)"$/, "$1").trim();
+    const clientEtag = norm(rawClientEtag);
+    const currentEtag = norm(current?.etag || "");
+    if (current && (!clientEtag || clientEtag !== currentEtag)) return json(409, { error: "云端数据已被另一台设备修改，请重新加载" });
+    if (!current && rawClientEtag) return json(409, { error: "云端数据状态已变化，请重新加载" });
     const body = JSON.stringify(state);
     const response = await ossRequest("PUT", { body, contentType: "application/json; charset=utf-8" });
     if (!response.ok) throw new Error(`OSS 保存失败：${response.status}`);
