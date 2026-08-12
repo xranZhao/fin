@@ -55,10 +55,10 @@
   --content-width: 820px;
   --safe-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
 
-  /* 字体栈 — 思源宋体 Heavy 标题 + 阿里惠普数字 + 正文无衬线 */
-  --font-title: "Source Han Serif SC", "Noto Serif SC", "Songti SC", serif;
+  /* 字体栈 — 思源黑体标题 + 阿里惠普数字 + 思源黑体正文 */
+  --font-title: "Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-number: "Alibaba PuHuiTi", "Outfit", "Impact", sans-serif;
-  --font-sans: Inter, "SF Pro Text", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-sans: "Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 
   /* 全局字号缩放至 80% */
   font-size: 13px; /* 基准 16px × 0.8 = 12.8px，取 13px */
@@ -189,7 +189,7 @@ h1 {
   margin-bottom: 0;
   font-family: var(--font-title);
   font-size: clamp(1.75rem, 7vw, 2.25rem);
-  font-weight: 400;
+  font-weight: 700;
   line-height: 1.12;
   letter-spacing: -0.02em;
 }
@@ -198,7 +198,7 @@ h2 {
   margin-bottom: 0.25rem;
   font-family: var(--font-title);
   font-size: 1.05rem;
-  font-weight: 400;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -265,6 +265,7 @@ h2 {
 .brand-title {
   font-family: var(--font-title);
   font-size: 0.9rem;
+  font-weight: 700;
 }
 
 .brand-subtitle {
@@ -1080,7 +1081,7 @@ textarea { resize: vertical; line-height: 1.5; }
 .viewer-only { display: none; }
 body.viewer-mode .viewer-only { display: inline-flex; }
 body.viewer-mode .manager-only { display: none !important; }
-body.viewer-mode #settingsButton { display: inline-flex !important; }
+body.viewer-mode #settingsButton { display: none !important; }
 body.viewer-mode .settings-group:not(:last-child),
 body.viewer-mode .dialog-footer { display: none; }
 body.viewer-mode .settings-group:last-child .stacked-actions > :not(#toggleRoleButton) { display: none; }

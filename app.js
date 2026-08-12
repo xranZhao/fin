@@ -680,89 +680,102 @@ function openSettings() {
   const s = state.settings;
   const su = s.people.suli;
   const cq = s.people.chenqian;
+  const isViewer = cloudMode ? cloudSession?.role === "viewer" : s.role === "viewer";
+  const d = isViewer ? " disabled" : "";
   const body = byId("settingsBody");
 
   body.innerHTML = `
     <div class="settings-group">
       <h3>家庭默认值</h3>
       <div class="field-grid two-columns">
-        <div class="field"><span>月度花费预算</span><div class="money-input"><b>¥</b><input type="number" id="setBudget" value="${s.monthlyBudget}" inputmode="decimal" step="100" min="0"></div></div>
-        <div class="field"><span>家庭储蓄目标</span><div class="money-input"><b>¥</b><input type="number" id="setSavingsGoal" value="${s.savingsGoal}" inputmode="decimal" step="1000" min="0"></div></div>
+        <div class="field"><span>月度花费预算</span><div class="money-input"><b>¥</b><input type="number" id="setBudget" value="${s.monthlyBudget}"${d} inputmode="decimal" step="100" min="0"></div></div>
+        <div class="field"><span>家庭储蓄目标</span><div class="money-input"><b>¥</b><input type="number" id="setSavingsGoal" value="${s.savingsGoal}"${d} inputmode="decimal" step="1000" min="0"></div></div>
       </div>
     </div>
     <div class="settings-group">
       <h3>显示名称</h3>
       <div class="field-grid dual-input">
-        <div class="field"><span>欣然</span><input type="text" id="setSuliName" value="${esc(su.name)}" maxlength="20"></div>
-        <div class="field"><span>陈前</span><input type="text" id="setChenqianName" value="${esc(cq.name)}" maxlength="20"></div>
+        <div class="field"><span>欣然</span><input type="text" id="setSuliName" value="${esc(su.name)}"${d} maxlength="20"></div>
+        <div class="field"><span>陈前</span><input type="text" id="setChenqianName" value="${esc(cq.name)}"${d} maxlength="20"></div>
       </div>
     </div>
     <div class="settings-group">
       <h3>欣然 · 工作资料</h3>
-      ${wpFields("suli", su.workProfile)}
+      ${wpFields("suli", su.workProfile, d)}
       <div class="calc-preview" id="calcPreviewSuli"></div>
     </div>
     <div class="settings-group">
       <h3>陈前 · 工作资料</h3>
-      ${wpFields("chenqian", cq.workProfile)}
+      ${wpFields("chenqian", cq.workProfile, d)}
       <div class="calc-preview" id="calcPreviewChenqian"></div>
     </div>
     <div class="settings-group">
       <h3>备份与恢复</h3>
       <div class="stacked-actions">
-        <button class="secondary-button" type="button" id="exportBackupBtn">导出 JSON 备份</button>
-        <label class="secondary-button file-button" style="cursor:pointer;">从备份恢复<input type="file" id="importBackupFile" accept=".json" hidden></label>
-        <button class="danger-button" type="button" id="clearDataBtn">清空本地数据</button>
+        ${isViewer ? '' : '<button class="secondary-button" type="button" id="exportBackupBtn">导出 JSON 备份</button>'}
+        ${isViewer ? '' : '<label class="secondary-button file-button" style="cursor:pointer;">从备份恢复<input type="file" id="importBackupFile" accept=".json" hidden></label>'}
+        ${isViewer ? '' : '<button class="danger-button" type="button" id="clearDataBtn">清空本地数据</button>'}
+        ${isViewer ? '<p style="color:var(--ink-soft);font-size:0.74rem;padding:0.5rem;">只读模式，设置仅供查看。</p>' : ''}
       </div>
     </div>
   `;
 
-  // 绑定事件
-  byId("closeSettingsButton").onclick = async () => { await saveSettingsFromDialog(); byId("settingsDialog").close(); };
-  byId("toggleRoleButton").onclick = toggleRole;
-  byId("exportBackupBtn").onclick = () => {
-    const blob = new Blob([exportState(state)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `家庭财务备份_${new Date().toISOString().slice(0, 10)}.json`; a.click();
-    URL.revokeObjectURL(url);
-    showToast("备份已下载");
-  };
-  byId("importBackupFile").onchange = async (e) => {
-    try {
-      const text = await e.target.files[0].text();
-      state = importState(text);
+  // 绑定事件（仅管理员）
+  if (!isViewer) {
+    byId("exportBackupBtn").onclick = () => {
+      const blob = new Blob([exportState(state)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = `家里有前备份_${new Date().toISOString().slice(0, 10)}.json`; a.click();
+      URL.revokeObjectURL(url);
+      showToast("备份已下载");
+    };
+    byId("importBackupFile").onchange = async (e) => {
+      try {
+        const text = await e.target.files[0].text();
+        state = importState(text);
+        await syncCloudState();
+        skipNextSettingsSave = true;
+        byId("settingsDialog").close();
+        showToast("备份已恢复");
+        setTimeout(() => location.reload(), 500);
+      } catch (err) { showToast(err.message); }
+    };
+    byId("clearDataBtn").onclick = async () => {
+      if (!confirm("确定清空全部数据？此操作不可恢复。")) return;
+      state = clearState();
       await syncCloudState();
-      skipNextSettingsSave = true;
       byId("settingsDialog").close();
-      showToast("备份已恢复，页面即将刷新");
-      setTimeout(() => location.reload(), 500);
-    } catch (err) { showToast(err.message); }
-  };
-  byId("clearDataBtn").onclick = async () => {
-    if (!confirm("确定清空全部本地数据？此操作不可恢复。")) return;
-    state = clearState();
-    await syncCloudState();
+      location.reload();
+    };
+  }
+
+  // 关闭按钮
+  byId("closeSettingsButton").onclick = async () => {
+    if (!isViewer) await saveSettingsFromDialog();
     byId("settingsDialog").close();
-    location.reload();
   };
+  byId("toggleRoleButton").onclick = toggleRole;
 
   // 实时预览
-  ["suli", "chenqian"].forEach(k => updateCalcPreview(k));
-  settingsDirty = false;
+  if (!isViewer) {
+    ["suli", "chenqian"].forEach(k => updateCalcPreview(k));
+    settingsDirty = false;
+  }
   byId("settingsDialog").showModal();
 }
 
-function wpFields(key, wp) {
+function wpFields(key, wp, disabled) {
   const pfx = key === "suli" ? "setSuli" : "setChenqian";
+  const d = disabled || "";
   return `
     <div class="field-grid two-columns">
-      <div class="field"><span>参考税后月薪</span><div class="money-input"><b>¥</b><input type="number" id="${pfx}RefIncome" value="${wp.referenceMonthlyIncome || ""}" inputmode="decimal" step="100" min="0"></div></div>
-      <div class="field"><span>每月工作天数</span><input type="number" id="${pfx}WorkDays" value="${wp.workDaysPerMonth || 22}" inputmode="numeric" min="1" max="31"></div>
-      <div class="field"><span>每天工作小时</span><input type="number" id="${pfx}WorkHours" value="${wp.workHoursPerDay || 8}" inputmode="numeric" min="1" max="16" step="0.5"></div>
-      <div class="field"><span>每日通勤（分钟）</span><input type="number" id="${pfx}CommuteMin" value="${wp.commuteMinutesPerDay || ""}" inputmode="numeric" min="0"></div>
-      <div class="field"><span>每日工作餐成本</span><div class="money-input"><b>¥</b><input type="number" id="${pfx}MealCost" value="${wp.mealCostPerWorkday || ""}" inputmode="decimal" step="1" min="0"></div></div>
-      <div class="field"><span>每月通勤成本</span><div class="money-input"><b>¥</b><input type="number" id="${pfx}CommuteCost" value="${wp.commuteCostPerMonth || ""}" inputmode="decimal" step="10" min="0"></div></div>
-      <div class="field"><span>每月其他工作成本</span><div class="money-input"><b>¥</b><input type="number" id="${pfx}OtherCost" value="${wp.otherWorkCostPerMonth || ""}" inputmode="decimal" step="10" min="0"></div></div>
+      <div class="field"><span>参考税后月薪</span><div class="money-input"><b>¥</b><input type="number" id="${pfx}RefIncome" value="${wp.referenceMonthlyIncome || ""}"${d} inputmode="decimal" step="100" min="0"></div></div>
+      <div class="field"><span>每月工作天数</span><input type="number" id="${pfx}WorkDays" value="${wp.workDaysPerMonth || 22}"${d} inputmode="numeric" min="1" max="31"></div>
+      <div class="field"><span>每天工作小时</span><input type="number" id="${pfx}WorkHours" value="${wp.workHoursPerDay || 8}"${d} inputmode="numeric" min="1" max="16" step="0.5"></div>
+      <div class="field"><span>每日通勤（分钟）</span><input type="number" id="${pfx}CommuteMin" value="${wp.commuteMinutesPerDay || ""}"${d} inputmode="numeric" min="0"></div>
+      <div class="field"><span>每日工作餐成本</span><div class="money-input"><b>¥</b><input type="number" id="${pfx}MealCost" value="${wp.mealCostPerWorkday || ""}"${d} inputmode="decimal" step="1" min="0"></div></div>
+      <div class="field"><span>每月通勤成本</span><div class="money-input"><b>¥</b><input type="number" id="${pfx}CommuteCost" value="${wp.commuteCostPerMonth || ""}"${d} inputmode="decimal" step="10" min="0"></div></div>
+      <div class="field"><span>每月其他工作成本</span><div class="money-input"><b>¥</b><input type="number" id="${pfx}OtherCost" value="${wp.otherWorkCostPerMonth || ""}"${d} inputmode="decimal" step="10" min="0"></div></div>
     </div>`;
 }
 
